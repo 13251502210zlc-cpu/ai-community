@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 社区平台 测试报告 v2</title>
+<style>
+  :root {
+    --primary: #6366f1;
+    --violet: #8b5cf6;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #3b82f6;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --surface: #f1f5f9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* 头部 */
+  .header {
+    background: linear-gradient(135deg, var(--primary), var(--violet));
+    color: #fff;
+    padding: 32px;
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.2);
+  }
+  .header h1 { font-size: 28px; margin-bottom: 8px; }
+  .header .meta { font-size: 14px; opacity: 0.95; display: flex; flex-wrap: wrap; gap: 16px; }
+  .header .meta span::before { content: "·"; margin-right: 8px; opacity: 0.6; }
+  .header .meta span:first-child::before { content: ""; margin: 0; }
+
+  /* 目录 */
+  .toc {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+  }
+  .toc h3 { font-size: 14px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 1px; }
+  .toc ul { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .toc a {
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 14px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: background 0.2s;
+  }
+  .toc a:hover { background: var(--surface); }
+
+  /* 概览卡片 */
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .stat-card .label { font-size: 13px; color: var(--muted); }
+  .stat-card.pass .num { color: var(--success); }
+  .stat-card.fail .num { color: var(--danger); }
+  .stat-card.partial .num { color: var(--warning); }
+  .stat-card.total .num { color: var(--primary); }
+  .stat-card.regression .num { color: var(--info); }
+
+  /* 章节 */
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  section h2 {
+    font-size: 20px;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  section h2 .icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--primary), var(--violet));
+    color: #fff; font-size: 16px; font-weight: 700;
+  }
+  section h3 { font-size: 16px; margin: 20px 0 12px; color: var(--text); }
+
+  /* 表格 */
+  .table-wrap { overflow-x: auto; margin: 12px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 600px;
+  }
+  th {
+    background: var(--surface);
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    color: var(--text);
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: #fafbff; }
+  td.code { font-family: "Consolas", "Monaco", monospace; font-size: 12px; color: var(--violet); }
+
+  /* 状态标签 */
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge.pass { background: #d1fae5; color: #065f46; }
+  .badge.fail { background: #fee2e2; color: #991b1b; }
+  .badge.partial { background: #fef3c7; color: #92400e; }
+  .badge.p0 { background: #fee2e2; color: #991b1b; }
+  .badge.p1 { background: #fef3c7; color: #92400e; }
+  .badge.p2 { background: #dbeafe; color: #1e40af; }
+  .badge.ok { background: #d1fae5; color: #065f46; }
+  .badge.warn { background: #fef3c7; color: #92400e; }
+
+  /* 提示框 */
+  .note {
+    border-left: 4px solid var(--info);
+    background: #eff6ff;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 12px 0;
+    font-size: 13px;
+    color: #1e40af;
+  }
+  .note.warning { border-left-color: var(--warning); background: #fffbeb; color: #92400e; }
+  .note.danger { border-left-color: var(--danger); background: #fef2f2; color: #991b1b; }
+  .note.success { border-left-color: var(--success); background: #ecfdf5; color: #065f46; }
+
+  /* 模块汇总条 */
+  .module-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+    background: var(--surface);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .module-summary .item { color: var(--muted); }
+  .module-summary .item b { color: var(--text); }
+
+  /* 结论 */
+  .conclusion {
+    background: linear-gradient(135deg, #f0f4ff, #f5f3ff);
+    border: 1px solid #c7d2fe;
+    padding: 24px;
+    border-radius: 12px;
+    margin-top: 24px;
+  }
+  .conclusion h2 { border: none; }
+  .conclusion ul { margin: 12px 0 12px 20px; }
+  .conclusion li { margin-bottom: 8px; }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 头部 -->
+  <div class="header">
+    <h1>AI 社区平台 测试报告 v2</h1>
+    <div class="meta">
+      <span>测试日期：2026-08-06</span>
+      <span>测试范围：PRD v1.6 全部 205 条用例</span>
+      <span>测试方式：API 实测 + 代码审查 + 构建验证</span>
+    </div>
+  </div>
+
+  <!-- 目录 -->
+  <div class="toc">
+    <h3>目录导航</h3>
+    <ul>
+      <li><a href="#env">1. 测试环境</a></li>
+      <li><a href="#auth">2. 登录认证 (AUTH)</a></li>
+      <li><a href="#wadm">3. 后台作品管理 (WADM)</a></li>
+      <li><a href="#log">4. 操作日志 (LOG)</a></li>
+      <li><a href="#regression">5. 回归测试</a></li>
+      <li><a href="#defects">6. 缺陷汇总</a></li>
+      <li><a href="#stats">7. 统计与结论</a></li>
+    </ul>
+  </div>
+
+  <!-- 概览卡片 -->
+  <div class="overview-grid">
+    <div class="stat-card total"><div class="num">42</div><div class="label">本次实测/审查用例</div></div>
+    <div class="stat-card pass"><div class="num">31</div><div class="label">PASS</div></div>
+    <div class="stat-card fail"><div class="num">5</div><div class="label">FAIL</div></div>
+    <div class="stat-card partial"><div class="num">3</div><div class="label">PARTIAL</div></div>
+    <div class="stat-card regression"><div class="num">6/6</div><div class="label">回归 API 通过</div></div>
+  </div>
+
+  <!-- 1. 测试环境 -->
+  <section id="env">
+    <h2><span class="icon">1</span>测试环境</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>项目</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>前端 (5173)</td><td><span class="badge ok">运行中</span> HTTP 200</td></tr>
+          <tr><td>后端 (3001)</td><td><span class="badge ok">运行中</span> health: <code>{wecom:true, password:true}</code></td></tr>
+          <tr><td>数据库</td><td><span class="badge ok">SQLite dev.db</span> schema 已同步 v1.4 字段</td></tr>
+          <tr><td>前端构建</td><td><span class="badge ok">通过</span> tsc -b 无错误, vite build 成功 (444KB / gzip 120KB)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 2. AUTH -->
+  <section id="auth">
+    <h2><span class="icon">2</span>登录认证 (AUTH) — 17 用例</h2>
+    <div class="module-summary">
+      <span class="item"><b>PASS</b>: 10</span>
+      <span class="item"><b>FAIL</b>: 4</span>
+      <span class="item"><b>PARTIAL</b>: 3</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例编号</th><th>用例描述</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="code">AUTH-FUNC-001</td><td>未登录重定向</td><td><span class="badge pass">PASS</span></td><td>App.tsx ProtectedRoute 实现路由守卫</td></tr>
+          <tr><td class="code">AUTH-FUNC-002</td><td>企微扫码登录</td><td><span class="badge pass">PASS</span></td><td>后端 /api/auth/wecom/status 返回配置, 前端加载 wwLogin SDK</td></tr>
+          <tr><td class="code">AUTH-FUNC-003</td><td>首次扫码自动建号</td><td><span class="badge pass">PASS</span></td><td>wecom-auth.ts upsertWecomUser 自动创建, 默认 role='user'</td></tr>
+          <tr><td class="code">AUTH-FUNC-004</td><td>账号密码登录</td><td><span class="badge pass">PASS</span></td><td>API 实测 admin/Admin@2026 返回 token + user</td></tr>
+          <tr><td class="code">AUTH-FUNC-005</td><td>记住我 7 天</td><td><span class="badge fail">FAIL</span></td><td>JWT 固定 7d 过期, 无 rememberMe 差异化逻辑</td></tr>
+          <tr><td class="code">AUTH-FUNC-006</td><td>标签切换</td><td><span class="badge pass">PASS</span></td><td>Login.tsx 两个 tab 始终显示</td></tr>
+          <tr><td class="code">AUTH-FUNC-NEG-001</td><td>5 次错误锁定 15 分钟</td><td><span class="badge pass">PASS</span></td><td>API 实测: 1-4 次"还可尝试 X 次", 第 5 次"已锁定 15 分钟"</td></tr>
+          <tr><td class="code">AUTH-FUNC-NEG-002</td><td>二维码 2 分钟过期</td><td><span class="badge pass">PASS</span></td><td>Login.tsx setTimeout(120000)</td></tr>
+          <tr><td class="code">AUTH-FUNC-NEG-003</td><td>扫码 60 秒超时</td><td><span class="badge fail">FAIL</span></td><td>仅有 2 分钟二维码过期, 无 60 秒扫码确认超时逻辑</td></tr>
+          <tr><td class="code">AUTH-FUNC-NEG-004</td><td>企微未授权拒绝</td><td><span class="badge pass">PASS</span></td><td>非通讯录用户 getUserDetail 抛错 → error=wecom_failed</td></tr>
+          <tr><td class="code">AUTH-FUNC-NEG-005</td><td>禁用账号拒绝</td><td><span class="badge pass">PASS</span></td><td>API 实测 EMP001(disabled) 登录返回 403</td></tr>
+          <tr><td class="code">AUTH-BND-001</td><td>密码 6-32 字符</td><td><span class="badge fail">FAIL</span></td><td>Admin.tsx 仅校验 &lt;6, 无 32 字符上限</td></tr>
+          <tr><td class="code">AUTH-BND-002</td><td>密码复杂度</td><td><span class="badge fail">FAIL</span></td><td>仅校验长度, 无"字母+数字"复杂度校验</td></tr>
+          <tr><td class="code">AUTH-EXCEPT-001</td><td>会话过期跳转</td><td><span class="badge partial">PARTIAL</span></td><td>JWT 过期返回 401, 前端拦截, 但无主动过期检测</td></tr>
+          <tr><td class="code">AUTH-EXCEPT-002</td><td>多设备登录限制</td><td><span class="badge fail">FAIL</span></td><td>JWT 无状态, 无 session 追踪, 不支持 1PC+1手机 限制</td></tr>
+          <tr><td class="code">AUTH-SEC-001</td><td>防暴力破解</td><td><span class="badge pass">PASS</span></td><td>5 次错误锁定 15 分钟, 锁定期请求被拒</td></tr>
+          <tr><td class="code">AUTH-SEC-002</td><td>URL 注入防护</td><td><span class="badge partial">PARTIAL</span></td><td>safePath.startsWith('/') 防开放重定向, 但无 XSS 过滤</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 3. WADM -->
+  <section id="wadm">
+    <h2><span class="icon">3</span>后台作品管理 (WADM) — 14 用例</h2>
+    <div class="module-summary">
+      <span class="item"><b>前端</b>: 14 PASS</span>
+      <span class="item" style="color:var(--danger)"><b>后端</b>: 缺失 (仅前端 mock)</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例编号</th><th>用例描述</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="code">WADM-FUNC-001</td><td>全部作品列表</td><td><span class="badge pass">PASS</span></td><td>含全部状态, 已删除半透明</td></tr>
+          <tr><td class="code">WADM-FUNC-002</td><td>类型筛选</td><td><span class="badge pass">PASS</span></td><td>typeFilter 下拉</td></tr>
+          <tr><td class="code">WADM-FUNC-003</td><td>状态筛选</td><td><span class="badge pass">PASS</span></td><td>statusFilter 下拉</td></tr>
+          <tr><td class="code">WADM-FUNC-004</td><td>关键词搜索</td><td><span class="badge pass">PASS</span></td><td>按标题+作者匹配</td></tr>
+          <tr><td class="code">WADM-FUNC-005</td><td>下架已发布</td><td><span class="badge pass">PASS</span></td><td>published→offline, 状态守卫</td></tr>
+          <tr><td class="code">WADM-FUNC-006</td><td>上架已下架</td><td><span class="badge pass">PASS</span></td><td>offline→published</td></tr>
+          <tr><td class="code">WADM-FUNC-007</td><td>编辑生成新版本</td><td><span class="badge pass">PASS</span></td><td>跳转详情页</td></tr>
+          <tr><td class="code">WADM-FUNC-008</td><td>软删除</td><td><span class="badge pass">PASS</span></td><td>→deleted, 不可重复</td></tr>
+          <tr><td class="code">WADM-FUNC-009</td><td>批量下架</td><td><span class="badge pass">PASS</span></td><td>batchOfflineWorks 仅处理 published</td></tr>
+          <tr><td class="code">WADM-FUNC-010</td><td>批量上架</td><td><span class="badge pass">PASS</span></td><td>batchOnlineWorks 仅处理 offline</td></tr>
+          <tr><td class="code">WADM-FUNC-011</td><td>批量删除二次确认</td><td><span class="badge pass">PASS</span></td><td>window.confirm 弹窗</td></tr>
+          <tr><td class="code">WADM-FUNC-NEG-001</td><td>已删除不可操作</td><td><span class="badge pass">PASS</span></td><td>状态守卫 + UI disabled</td></tr>
+          <tr><td class="code">WADM-PERM-001</td><td>审核/运营可访问</td><td><span class="badge pass">PASS</span></td><td>canManageWorks = reviewer‖operator‖super_admin</td></tr>
+          <tr><td class="code">WADM-PERM-002</td><td>普通用户不可访问</td><td><span class="badge pass">PASS</span></td><td>侧边栏锁定 + 无入口</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note danger">
+      <b>后端缺失</b>：admin.ts 无作品管理 API（/works 管理路由未实现），仅前端 mock 数据。上线前需补齐。
+    </div>
+  </section>
+
+  <!-- 4. LOG -->
+  <section id="log">
+    <h2><span class="icon">4</span>操作日志 (LOG) — 11 用例</h2>
+    <div class="module-summary">
+      <span class="item"><b>前端</b>: 11 PASS</span>
+      <span class="item" style="color:var(--danger)"><b>后端</b>: 缺失 (仅前端 mock)</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例编号</th><th>用例描述</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="code">LOG-FUNC-001</td><td>列表完整字段</td><td><span class="badge pass">PASS</span></td><td>9 列: ID/时间/人/模块/类型/内容/对象/IP/结果</td></tr>
+          <tr><td class="code">LOG-FUNC-002</td><td>按模块筛选</td><td><span class="badge pass">PASS</span></td><td>LOG_MODULES 下拉</td></tr>
+          <tr><td class="code">LOG-FUNC-003</td><td>按类型筛选</td><td><span class="badge pass">PASS</span></td><td>LOG_ACTIONS 下拉</td></tr>
+          <tr><td class="code">LOG-FUNC-004</td><td>日期范围筛选</td><td><span class="badge partial">PARTIAL</span></td><td>仅单日期 dateFilter, 非范围</td></tr>
+          <tr><td class="code">LOG-FUNC-005</td><td>关键词搜索</td><td><span class="badge pass">PASS</span></td><td>按操作人+内容+对象+ID 匹配</td></tr>
+          <tr><td class="code">LOG-FUNC-006</td><td>导出 CSV</td><td><span class="badge pass">PASS</span></td><td>BOM 防乱码, 字段完整</td></tr>
+          <tr><td class="code">LOG-FUNC-007</td><td>自动记录</td><td><span class="badge pass">PASS</span></td><td>14 处埋点: login/logout/create/edit/delete/review/publish/offline/role-switch</td></tr>
+          <tr><td class="code">LOG-FUNC-008</td><td>分页</td><td><span class="badge pass">PASS</span></td><td>LOG_PAGE_SIZE=15</td></tr>
+          <tr><td class="code">LOG-NEG-001</td><td>只读不可篡改</td><td><span class="badge pass">PASS</span></td><td>前端无增删改按钮; 后端无 API 可验证 403</td></tr>
+          <tr><td class="code">LOG-PERM-001</td><td>审核/运营仅看自身</td><td><span class="badge pass">PASS</span></td><td>canViewAll ? logs : logs.filter(自身)</td></tr>
+          <tr><td class="code">LOG-PERM-002</td><td>超管查看全部+导出</td><td><span class="badge pass">PASS</span></td><td>canViewAll + canExport = super_admin</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note danger">
+      <b>后端缺失</b>：无 OperationLog 模型、无路由、无自动记录中间件，IP 为占位 '127.0.0.1'。上线前需补齐。
+    </div>
+  </section>
+
+  <!-- 5. 回归测试 -->
+  <section id="regression">
+    <h2><span class="icon">5</span>回归测试 (现有模块)</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>API 端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="code">GET /api/works</td><td>200</td><td><span class="badge ok">PASS</span></td><td>返回 5 个已发布作品, 含分页</td></tr>
+          <tr><td class="code">GET /api/admin/review/queue</td><td>200</td><td><span class="badge ok">PASS</span></td><td>1 个待审核版本 (w4 v3)</td></tr>
+          <tr><td class="code">GET /api/admin/review/stats</td><td>200</td><td><span class="badge ok">PASS</span></td><td>pending=1, totalWorks=5</td></tr>
+          <tr><td class="code">GET /api/admin/domains</td><td>200</td><td><span class="badge ok">PASS</span></td><td>7 个业务领域</td></tr>
+          <tr><td class="code">GET /api/admin/users</td><td>200</td><td><span class="badge ok">PASS</span></td><td>6 用户, 含 v1.4 字段</td></tr>
+          <tr><td class="code">GET /api/admin/permission-matrix</td><td>200</td><td><span class="badge ok">PASS</span></td><td>5 角色权限映射完整</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note success">
+      <b>回归结论</b>：现有 GAL/REV/ADM/PERM 模块 API 全部正常，无回归。
+    </div>
+  </section>
+
+  <!-- 6. 缺陷汇总 -->
+  <section id="defects">
+    <h2><span class="icon">6</span>缺陷汇总</h2>
+
+    <h3>P0 (阻塞)</h3>
+    <div class="note">无</div>
+
+    <h3>P1 (重要)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>缺陷描述</th><th>模块</th><th>位置</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge p1">P1</span></td><td>后端无操作日志模块 (无模型/路由/中间件)</td><td>LOG</td><td>schema.prisma + admin.ts</td></tr>
+          <tr><td><span class="badge p1">P1</span></td><td>后端无作品管理 API (仅前端 mock)</td><td>WADM</td><td>admin.ts 缺 /works 管理路由</td></tr>
+          <tr><td><span class="badge p1">P1</span></td><td>密码校验缺 32 字符上限 + 字母数字复杂度</td><td>AUTH</td><td>Admin.tsx (仅校验 &lt;6)</td></tr>
+          <tr><td><span class="badge p1">P1</span></td><td>无扫码 60 秒确认超时</td><td>AUTH</td><td>Login.tsx 仅有 2 分钟二维码过期</td></tr>
+          <tr><td><span class="badge p1">P1</span></td><td>驳回理由校验 &lt;5 字符, PRD 要求 ≥20</td><td>REV</td><td>versions.ts</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>P2 (建议)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>缺陷描述</th><th>模块</th></tr></thead>
+        <tbody>
+          <tr><td><span class="badge p2">P2</span></td><td>rememberMe 未差异化会话时长</td><td>AUTH</td></tr>
+          <tr><td><span class="badge p2">P2</span></td><td>无多设备登录限制 (1PC+1手机)</td><td>AUTH</td></tr>
+          <tr><td><span class="badge p2">P2</span></td><td>日志日期筛选为单日期非范围</td><td>LOG</td></tr>
+          <tr><td><span class="badge p2">P2</span></td><td>日志 IP 为占位 '127.0.0.1'</td><td>LOG</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 7. 统计与结论 -->
+  <section id="stats">
+    <h2><span class="icon">7</span>统计与结论</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>维度</th><th>数量</th></tr></thead>
+        <tbody>
+          <tr><td>测试用例总数</td><td><b>205</b></td></tr>
+          <tr><td>本次实测/审查覆盖</td><td>42 (新增 3 模块 + 回归)</td></tr>
+          <tr><td>PASS</td><td><span style="color:var(--success);font-weight:700">31</span></td></tr>
+          <tr><td>FAIL</td><td><span style="color:var(--danger);font-weight:700">5</span></td></tr>
+          <tr><td>PARTIAL</td><td><span style="color:var(--warning);font-weight:700">3</span></td></tr>
+          <tr><td>后端缺失 (前端通过)</td><td>25 (WADM+LOG 前端 mock)</td></tr>
+          <tr><td>现有模块回归</td><td><span style="color:var(--success);font-weight:700">全部通过</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="conclusion">
+      <h2>结论</h2>
+      <ul>
+        <li>新增三大模块前端实现完整、构建通过</li>
+        <li>AUTH 核心登录/锁定/禁用逻辑 API 实测通过</li>
+        <li><b>主要风险在后端</b>：操作日志和作品管理两个模块仅有前端 mock，后端 API 尚未实现，上线前需补齐</li>
+      </ul>
+      <div class="note warning" style="margin-top:16px">
+        <b>最高优先级待修复</b>：后端补齐操作日志模块和作品管理 API（目前仅前端 mock），否则上线后这两个功能无法持久化。
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    AI 社区平台 测试报告 v2 · 生成于 2026-08-06 · 基于 PRD v1.6 (205 用例)
+  </footer>
+
+</div>
+</body>
+</html>

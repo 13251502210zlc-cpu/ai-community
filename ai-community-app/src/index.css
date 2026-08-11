@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/* === Theme variables — Fresh Gradient / AI Tech === */
+:root {
+  /* Background & surfaces */
+  --aic-background: #f7f8fc;
+  --aic-background-2: rgba(255, 255, 255, 0.72);
+  --aic-surface: #ffffff;
+  --aic-surface-elevated: #eef0f8;
+
+  /* Foreground */
+  --aic-foreground: #1a1b2e;
+  --aic-muted-foreground: #6b7280;
+
+  /* Primary brand (indigo) */
+  --aic-primary: #6366f1;
+  --aic-primary-foreground: #ffffff;
+  --aic-primary-light: rgba(99, 102, 241, 0.08);
+  --aic-primary-hover: #4f46e5;
+
+  /* Gradient partner (violet) */
+  --aic-gradient-violet: #8b5cf6;
+  --aic-violet-light: rgba(139, 92, 246, 0.08);
+
+  /* Cards / popovers */
+  --aic-card: #ffffff;
+  --aic-card-foreground: #1a1b2e;
+
+  /* Muted */
+  --aic-muted: #f3f4f6;
+
+  /* Borders / inputs */
+  --aic-border: rgba(99, 102, 241, 0.12);
+  --aic-border-solid: #e5e7eb;
+  --aic-input: #e5e7eb;
+  --aic-ring: #6366f1;
+
+  /* State colors */
+  --state-success: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.1);
+  --state-warning: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.1);
+  --state-danger: #ef4444;
+  --state-danger-bg: rgba(239, 68, 68, 0.08);
+  --state-info: #06b6d4;
+  --state-info-bg: rgba(6, 182, 212, 0.08);
+
+  /* Radius */
+  --aic-radius-small: 4px;
+  --aic-radius-medium: 8px;
+  --aic-radius-large: 12px;
+
+  /* Typography */
+  --font-display: 'InstrumentSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'WorkSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'DMMono', 'Consolas', monospace;
+
+  /* Layout */
+  --max-content: 1120px;
+}
+
+/* === Dark mode === */
+html.dark {
+  color-scheme: dark;
+  --aic-background: #11131f;
+  --aic-background-2: rgba(255, 255, 255, 0.05);
+  --aic-surface: #1a1b2e;
+  --aic-surface-elevated: #23253a;
+  --aic-foreground: #f3f4f6;
+  --aic-muted-foreground: #9ca3af;
+  --aic-card: #1a1b2e;
+  --aic-card-foreground: #f3f4f6;
+  --aic-muted: #23253a;
+  --aic-border: rgba(99, 102, 241, 0.22);
+  --aic-border-solid: #374151;
+  --aic-input: #374151;
+}
+
+/* === Tailwind theme mapping === */
+@theme inline {
+  --color-background: var(--aic-background);
+  --color-foreground: var(--aic-foreground);
+  --color-card: var(--aic-card);
+  --color-card-foreground: var(--aic-card-foreground);
+  --color-primary: var(--aic-primary);
+  --color-primary-foreground: var(--aic-primary-foreground);
+  --color-muted: var(--aic-muted);
+  --color-muted-foreground: var(--aic-muted-foreground);
+  --color-border: var(--aic-border);
+  --color-border-solid: var(--aic-border-solid);
+  --color-input: var(--aic-input);
+  --color-ring: var(--aic-ring);
+  --color-violet: var(--aic-gradient-violet);
+  --color-success: var(--state-success);
+  --color-warning: var(--state-warning);
+  --color-danger: var(--state-danger);
+  --color-info: var(--state-info);
+  --radius-sm: var(--aic-radius-small);
+  --radius-md: var(--aic-radius-medium);
+  --radius-lg: var(--aic-radius-large);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+}
+
+/* === Base reset & typography === */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--aic-foreground);
+  background: var(--aic-background);
+  line-height: 1.75;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* Ambient gradient background */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 800px 600px at 15% 10%, rgba(99, 102, 241, 0.07), transparent),
+    radial-gradient(ellipse 700px 500px at 85% 20%, rgba(139, 92, 246, 0.06), transparent),
+    radial-gradient(ellipse 900px 700px at 50% 80%, rgba(99, 102, 241, 0.04), transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+/* === Cover gradients === */
+.cover-skill { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+.cover-app { background: linear-gradient(135deg, #06b6d4, #3b82f6); }
+.cover-agent { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+.cover-prompt { background: linear-gradient(135deg, #10b981, #06b6d4); }
+.cover-workflow { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+.cover-case { background: linear-gradient(135deg, #f97316, #eab308); }
+
+/* === Scrollbar === */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--aic-border-solid); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--aic-muted-foreground); }
+
+/* === Utility animations === */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fade-in 0.2s ease-out; }
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { animation: slide-up 0.25s ease-out; }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translate(-50%, -12px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+.animate-toast-in { animation: toast-in 0.25s ease-out; }

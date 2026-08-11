@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作品大厅 - AI 社区平台</title>
+    <style id="theme-vars">
+/* AI 社区平台 — 产品原型品牌样式
+   源自 PRD "Fresh Gradient / AI Tech" 主题 */
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'DMMono';
+  src: local('DMMono'), local('DM Mono');
+  font-weight: 400;
+}
+:root {
+  --aic-background: #f7f8fc;
+  --aic-background-2: rgba(255, 255, 255, 0.72);
+  --aic-surface: #ffffff;
+  --aic-surface-elevated: #eef0f8;
+  --aic-foreground: #1a1b2e;
+  --aic-muted-foreground: #6b7280;
+  --aic-primary: #6366f1;
+  --aic-primary-foreground: #ffffff;
+  --aic-primary-light: rgba(99, 102, 241, 0.08);
+  --aic-primary-hover: #4f46e5;
+  --aic-gradient-violet: #8b5cf6;
+  --aic-card: #ffffff;
+  --aic-card-foreground: #1a1b2e;
+  --aic-popover: #ffffff;
+  --aic-popover-foreground: #1a1b2e;
+  --aic-muted: #f3f4f6;
+  --aic-muted-foreground: #6b7280;
+  --aic-border: rgba(99, 102, 241, 0.12);
+  --aic-border-solid: #e5e7eb;
+  --aic-input: #e5e7eb;
+  --aic-ring: #6366f1;
+  --state-success: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.08);
+  --state-warning: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.08);
+  --state-error: #ef4444;
+  --state-error-bg: rgba(239, 68, 68, 0.08);
+  --state-info: #06b6d4;
+  --state-info-bg: rgba(6, 182, 212, 0.08);
+  --aic-radius-small: 4px;
+  --aic-radius-medium: 8px;
+  --aic-radius-large: 12px;
+  --font-display: 'InstrumentSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'WorkSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'DMMono', 'Consolas', monospace;
+  --max-content: 1120px;
+  --sidebar-width: 240px;
+}
+html.light { color-scheme: light; }
+html.dark {
+  color-scheme: dark;
+  --aic-background: #11131f;
+  --aic-background-2: rgba(255, 255, 255, 0.05);
+  --aic-surface: #1a1b2e;
+  --aic-surface-elevated: #23253a;
+  --aic-foreground: #f3f4f6;
+  --aic-muted-foreground: #9ca3af;
+  --aic-card: #1a1b2e;
+  --aic-card-foreground: #f3f4f6;
+  --aic-popover: #1a1b2e;
+  --aic-popover-foreground: #f3f4f6;
+  --aic-muted: #23253a;
+  --aic-border: rgba(99, 102, 241, 0.22);
+  --aic-border-solid: #374151;
+  --aic-input: #374151;
+}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--aic-background);
+    --color-foreground: var(--aic-foreground);
+    --color-card: var(--aic-card);
+    --color-card-foreground: var(--aic-card-foreground);
+    --color-popover: var(--aic-popover);
+    --color-popover-foreground: var(--aic-popover-foreground);
+    --color-primary: var(--aic-primary);
+    --color-primary-foreground: var(--aic-primary-foreground);
+    --color-muted: var(--aic-muted);
+    --color-muted-foreground: var(--aic-muted-foreground);
+    --color-border: var(--aic-border);
+    --color-input: var(--aic-input);
+    --color-ring: var(--aic-ring);
+    --radius-sm: var(--aic-radius-small);
+    --radius-md: var(--aic-radius-medium);
+    --radius-lg: var(--aic-radius-large);
+  }
+  @layer base {
+    body { background: var(--aic-background); color: var(--aic-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--aic-background); }
+      .text-background { color: var(--aic-background); }
+      .border-background { border-color: var(--aic-background); }
+      .ring-background { --tw-ring-color: var(--aic-background); }
+      .bg-foreground { background-color: var(--aic-foreground); }
+      .text-foreground { color: var(--aic-foreground); }
+      .border-foreground { border-color: var(--aic-foreground); }
+      .ring-foreground { --tw-ring-color: var(--aic-foreground); }
+      .bg-card { background-color: var(--aic-card); }
+      .text-card { color: var(--aic-card); }
+      .border-card { border-color: var(--aic-card); }
+      .ring-card { --tw-ring-color: var(--aic-card); }
+      .bg-card-foreground { background-color: var(--aic-card-foreground); }
+      .text-card-foreground { color: var(--aic-card-foreground); }
+      .border-card-foreground { border-color: var(--aic-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--aic-card-foreground); }
+      .bg-popover { background-color: var(--aic-popover); }
+      .text-popover { color: var(--aic-popover); }
+      .border-popover { border-color: var(--aic-popover); }
+      .ring-popover { --tw-ring-color: var(--aic-popover); }
+      .bg-popover-foreground { background-color: var(--aic-popover-foreground); }
+      .text-popover-foreground { color: var(--aic-popover-foreground); }
+      .border-popover-foreground { border-color: var(--aic-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--aic-popover-foreground); }
+      .bg-primary { background-color: var(--aic-primary); }
+      .text-primary { color: var(--aic-primary); }
+      .border-primary { border-color: var(--aic-primary); }
+      .ring-primary { --tw-ring-color: var(--aic-primary); }
+      .bg-primary-foreground { background-color: var(--aic-primary-foreground); }
+      .text-primary-foreground { color: var(--aic-primary-foreground); }
+      .border-primary-foreground { border-color: var(--aic-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--aic-primary-foreground); }
+      .bg-muted { background-color: var(--aic-muted); }
+      .text-muted { color: var(--aic-muted); }
+      .border-muted { border-color: var(--aic-muted); }
+      .ring-muted { --tw-ring-color: var(--aic-muted); }
+      .bg-muted-foreground { background-color: var(--aic-muted-foreground); }
+      .text-muted-foreground { color: var(--aic-muted-foreground); }
+      .border-muted-foreground { border-color: var(--aic-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--aic-muted-foreground); }
+      .bg-border { background-color: var(--aic-border); }
+      .text-border { color: var(--aic-border); }
+      .border-border { border-color: var(--aic-border); }
+      .ring-border { --tw-ring-color: var(--aic-border); }
+      .bg-input { background-color: var(--aic-input); }
+      .text-input { color: var(--aic-input); }
+      .border-input { border-color: var(--aic-input); }
+      .ring-input { --tw-ring-color: var(--aic-input); }
+      .bg-ring { background-color: var(--aic-ring); }
+      .text-ring { color: var(--aic-ring); }
+      .border-ring { border-color: var(--aic-ring); }
+      .ring-ring { --tw-ring-color: var(--aic-ring); }
+    </style>
+    <style id="critical-layout">
+      body { font-family: var(--font-body); }
+      h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); }
+      .page-shell { min-height: 100vh; display: flex; flex-direction: column; }
+      .page-main { flex: 1; max-width: var(--max-content); width: 100%; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+      .work-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; }
+      @media (max-width: 1024px) { .work-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 640px) { .work-grid { grid-template-columns: minmax(0, 1fr); } }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] { display: inline-flex; align-items: center; justify-content: center; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; background-color: currentColor; }
+      .ambient-bg::before { content: ''; position: fixed; inset: 0; background: radial-gradient(ellipse 800px 600px at 15% 10%, rgba(99,102,241,0.07), transparent), radial-gradient(ellipse 700px 500px at 85% 20%, rgba(139,92,246,0.06), transparent), radial-gradient(ellipse 900px 700px at 50% 80%, rgba(99,102,241,0.04), transparent); pointer-events: none; z-index: 0; }
+      .cover-skill { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+      .cover-agent { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+      .cover-prompt { background: linear-gradient(135deg, #10b981, #06b6d4); }
+      .cover-workflow { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+      .cover-app { background: linear-gradient(135deg, #06b6d4, #3b82f6); }
+      .cover-case { background: linear-gradient(135deg, #f97316, #eab308); }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased ambient-bg">
+  <div class="page-shell relative z-10">
+    <header class="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md" style="border-color: var(--aic-border);">
+      <div class="mx-auto flex h-16 max-w-[var(--max-content)] items-center justify-between px-6">
+        <a href="index.html" data-dom-id="nav-home" class="flex items-center gap-2 text-lg font-bold text-primary" style="font-family: var(--font-display);">
+          <span class="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm">AI</span>
+          社区平台
+        </a>
+        <nav class="hidden items-center gap-1 md:flex">
+          <a href="index.html" data-dom-id="nav-gallery" class="rounded-md px-3 py-2 text-sm font-medium text-foreground bg-primary/10">作品大厅</a>
+          <a href="publish.html" data-dom-id="nav-publish" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">发布作品</a>
+          <a href="profile.html" data-dom-id="nav-profile" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">个人中心</a>
+          <a href="admin.html" data-dom-id="nav-admin" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">后台管理</a>
+        </nav>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">张</div>
+        </div>
+      </div>
+    </header>
+
+    <main class="page-main">
+      <section class="mb-6 rounded-xl border bg-card p-6 shadow-sm" style="border-color: var(--aic-border-solid);">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div class="flex flex-1 items-center gap-2">
+            <div class="relative flex-1 max-w-sm">
+              <i data-lucide="search" class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"></i>
+              <input type="text" placeholder="搜索作品名称、作者、关键词..." class="h-10 w-full rounded-md border border-input bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--aic-border-solid);">
+            </div>
+            <button class="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-[var(--aic-primary-hover)]">搜索</button>
+          </div>
+          <div class="flex items-center gap-2">
+            <select class="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none" style="border-color: var(--aic-border-solid);">
+              <option>最新发布</option>
+              <option>最多点赞</option>
+              <option>最多收藏</option>
+              <option>最多下载</option>
+            </select>
+            <a href="publish.html" data-dom-id="btn-publish" class="inline-flex h-10 items-center gap-1 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-[var(--aic-primary-hover)]">
+              <i data-lucide="plus" class="h-4 w-4"></i> 发布作品
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-4 flex flex-wrap gap-2 border-b pb-4" style="border-color: var(--aic-border-solid);">
+        <button class="rounded-full bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground">全部</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">Skill</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">应用程序</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">智能体</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">提示词</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">工作流</button>
+        <button class="rounded-full border px-4 py-1.5 text-sm font-medium text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">案例方案</button>
+      </section>
+
+      <section class="mb-6 flex flex-wrap items-center gap-2 text-sm">
+        <span class="text-muted-foreground">标签筛选：</span>
+        <button class="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary" style="border-color: var(--aic-border-solid);">客服</button>
+        <button class="rounded-full bg-primary/10 px-3 py-1 text-xs font-medium text-primary" style="border-color: var(--aic-border-solid);">财务</button>
+        <button class="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary" style="border-color: var(--aic-border-solid);">研发</button>
+        <button class="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary" style="border-color: var(--aic-border-solid);">市场</button>
+        <button class="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary" style="border-color: var(--aic-border-solid);">HR</button>
+        <button class="rounded-full border px-3 py-1 text-xs text-muted-foreground hover:border-primary hover:text-primary" style="border-color: var(--aic-border-solid);">数据治理</button>
+      </section>
+
+      <section class="work-grid mb-8">
+        <a href="detail.html" data-dom-id="card-work-1" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-skill flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">S</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Skill</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">自动报表生成 Skill</h3>
+            <p class="mt-1 text-sm text-muted-foreground">张明 · 财务部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 42</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 18</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 35</span>
+            </div>
+          </div>
+        </a>
+        <a href="detail.html" data-dom-id="card-work-2" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-agent flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">A</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">智能体</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">智能财务问答 Bot</h3>
+            <p class="mt-1 text-sm text-muted-foreground">张明 · 财务部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 87</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 56</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 72</span>
+            </div>
+          </div>
+        </a>
+        <a href="detail.html" data-dom-id="card-work-3" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-prompt flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">P</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-[var(--state-success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-success)]">提示词</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">营销文案生成 Prompt v2</h3>
+            <p class="mt-1 text-sm text-muted-foreground">李芳 · 市场部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 63</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 41</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 128</span>
+            </div>
+          </div>
+        </a>
+        <a href="detail.html" data-dom-id="card-work-4" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-workflow flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">W</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">工作流</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">客服工单自动分发流程</h3>
+            <p class="mt-1 text-sm text-muted-foreground">王伟 · 客服部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 55</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 33</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 47</span>
+            </div>
+          </div>
+        </a>
+        <a href="detail.html" data-dom-id="card-work-5" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-app flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">D</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">应用程序</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">合同智能审查工具</h3>
+            <p class="mt-1 text-sm text-muted-foreground">陈静 · 法务部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 39</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 22</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 31</span>
+            </div>
+          </div>
+        </a>
+        <a href="detail.html" data-dom-id="card-work-6" class="group overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-md" style="border-color: var(--aic-border-solid);">
+          <div class="cover-case flex h-32 items-center justify-center text-4xl font-bold text-white" style="font-family: var(--font-display);">C</div>
+          <div class="p-4">
+            <span class="inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">案例方案</span>
+            <h3 class="mt-2 text-base font-semibold text-foreground">AI 辅助招聘面试方案</h3>
+            <p class="mt-1 text-sm text-muted-foreground">刘洋 · HR部</p>
+            <div class="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+              <span class="flex items-center gap-1"><i data-lucide="thumbs-up" class="h-3 w-3"></i> 28</span>
+              <span class="flex items-center gap-1"><i data-lucide="star" class="h-3 w-3"></i> 15</span>
+              <span class="flex items-center gap-1"><i data-lucide="download" class="h-3 w-3"></i> 19</span>
+            </div>
+          </div>
+        </a>
+      </section>
+
+      <section class="flex justify-center gap-2">
+        <button class="inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);"><i data-lucide="chevron-left" class="h-4 w-4"></i></button>
+        <button class="inline-flex h-9 w-9 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm font-medium">1</button>
+        <button class="inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">2</button>
+        <button class="inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);">3</button>
+        <button class="inline-flex h-9 w-9 items-center justify-center rounded-md border text-muted-foreground hover:bg-muted" style="border-color: var(--aic-border-solid);"><i data-lucide="chevron-right" class="h-4 w-4"></i></button>
+      </section>
+    </main>
+  </div>
+  <script>lucide.createIcons();</script>
+</body>
+</html>

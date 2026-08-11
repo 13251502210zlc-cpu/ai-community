@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>后台管理 - AI 社区平台</title>
+    <style id="theme-vars">
+/* AI 社区平台 — 产品原型品牌样式
+   源自 PRD "Fresh Gradient / AI Tech" 主题 */
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'DMMono';
+  src: local('DMMono'), local('DM Mono');
+  font-weight: 400;
+}
+:root {
+  --aic-background: #f7f8fc;
+  --aic-background-2: rgba(255, 255, 255, 0.72);
+  --aic-surface: #ffffff;
+  --aic-surface-elevated: #eef0f8;
+  --aic-foreground: #1a1b2e;
+  --aic-muted-foreground: #6b7280;
+  --aic-primary: #6366f1;
+  --aic-primary-foreground: #ffffff;
+  --aic-primary-light: rgba(99, 102, 241, 0.08);
+  --aic-primary-hover: #4f46e5;
+  --aic-gradient-violet: #8b5cf6;
+  --aic-card: #ffffff;
+  --aic-card-foreground: #1a1b2e;
+  --aic-popover: #ffffff;
+  --aic-popover-foreground: #1a1b2e;
+  --aic-muted: #f3f4f6;
+  --aic-muted-foreground: #6b7280;
+  --aic-border: rgba(99, 102, 241, 0.12);
+  --aic-border-solid: #e5e7eb;
+  --aic-input: #e5e7eb;
+  --aic-ring: #6366f1;
+  --state-success: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.08);
+  --state-warning: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.08);
+  --state-error: #ef4444;
+  --state-error-bg: rgba(239, 68, 68, 0.08);
+  --state-info: #06b6d4;
+  --state-info-bg: rgba(6, 182, 212, 0.08);
+  --aic-radius-small: 4px;
+  --aic-radius-medium: 8px;
+  --aic-radius-large: 12px;
+  --font-display: 'InstrumentSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'WorkSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'DMMono', 'Consolas', monospace;
+  --max-content: 1120px;
+  --sidebar-width: 240px;
+}
+html.light { color-scheme: light; }
+html.dark {
+  color-scheme: dark;
+  --aic-background: #11131f;
+  --aic-background-2: rgba(255, 255, 255, 0.05);
+  --aic-surface: #1a1b2e;
+  --aic-surface-elevated: #23253a;
+  --aic-foreground: #f3f4f6;
+  --aic-muted-foreground: #9ca3af;
+  --aic-card: #1a1b2e;
+  --aic-card-foreground: #f3f4f6;
+  --aic-popover: #1a1b2e;
+  --aic-popover-foreground: #f3f4f6;
+  --aic-muted: #23253a;
+  --aic-border: rgba(99, 102, 241, 0.22);
+  --aic-border-solid: #374151;
+  --aic-input: #374151;
+}
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--aic-background);
+    --color-foreground: var(--aic-foreground);
+    --color-card: var(--aic-card);
+    --color-card-foreground: var(--aic-card-foreground);
+    --color-popover: var(--aic-popover);
+    --color-popover-foreground: var(--aic-popover-foreground);
+    --color-primary: var(--aic-primary);
+    --color-primary-foreground: var(--aic-primary-foreground);
+    --color-muted: var(--aic-muted);
+    --color-muted-foreground: var(--aic-muted-foreground);
+    --color-border: var(--aic-border);
+    --color-input: var(--aic-input);
+    --color-ring: var(--aic-ring);
+    --radius-sm: var(--aic-radius-small);
+    --radius-md: var(--aic-radius-medium);
+    --radius-lg: var(--aic-radius-large);
+  }
+  @layer base {
+    body { background: var(--aic-background); color: var(--aic-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--aic-background); }
+      .text-background { color: var(--aic-background); }
+      .border-background { border-color: var(--aic-background); }
+      .ring-background { --tw-ring-color: var(--aic-background); }
+      .bg-foreground { background-color: var(--aic-foreground); }
+      .text-foreground { color: var(--aic-foreground); }
+      .border-foreground { border-color: var(--aic-foreground); }
+      .ring-foreground { --tw-ring-color: var(--aic-foreground); }
+      .bg-card { background-color: var(--aic-card); }
+      .text-card { color: var(--aic-card); }
+      .border-card { border-color: var(--aic-card); }
+      .ring-card { --tw-ring-color: var(--aic-card); }
+      .bg-card-foreground { background-color: var(--aic-card-foreground); }
+      .text-card-foreground { color: var(--aic-card-foreground); }
+      .border-card-foreground { border-color: var(--aic-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--aic-card-foreground); }
+      .bg-popover { background-color: var(--aic-popover); }
+      .text-popover { color: var(--aic-popover); }
+      .border-popover { border-color: var(--aic-popover); }
+      .ring-popover { --tw-ring-color: var(--aic-popover); }
+      .bg-popover-foreground { background-color: var(--aic-popover-foreground); }
+      .text-popover-foreground { color: var(--aic-popover-foreground); }
+      .border-popover-foreground { border-color: var(--aic-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--aic-popover-foreground); }
+      .bg-primary { background-color: var(--aic-primary); }
+      .text-primary { color: var(--aic-primary); }
+      .border-primary { border-color: var(--aic-primary); }
+      .ring-primary { --tw-ring-color: var(--aic-primary); }
+      .bg-primary-foreground { background-color: var(--aic-primary-foreground); }
+      .text-primary-foreground { color: var(--aic-primary-foreground); }
+      .border-primary-foreground { border-color: var(--aic-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--aic-primary-foreground); }
+      .bg-muted { background-color: var(--aic-muted); }
+      .text-muted { color: var(--aic-muted); }
+      .border-muted { border-color: var(--aic-muted); }
+      .ring-muted { --tw-ring-color: var(--aic-muted); }
+      .bg-muted-foreground { background-color: var(--aic-muted-foreground); }
+      .text-muted-foreground { color: var(--aic-muted-foreground); }
+      .border-muted-foreground { border-color: var(--aic-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--aic-muted-foreground); }
+      .bg-border { background-color: var(--aic-border); }
+      .text-border { color: var(--aic-border); }
+      .border-border { border-color: var(--aic-border); }
+      .ring-border { --tw-ring-color: var(--aic-border); }
+      .bg-input { background-color: var(--aic-input); }
+      .text-input { color: var(--aic-input); }
+      .border-input { border-color: var(--aic-input); }
+      .ring-input { --tw-ring-color: var(--aic-input); }
+      .bg-ring { background-color: var(--aic-ring); }
+      .text-ring { color: var(--aic-ring); }
+      .border-ring { border-color: var(--aic-ring); }
+      .ring-ring { --tw-ring-color: var(--aic-ring); }
+    </style>
+    <style id="critical-layout">
+      body { font-family: var(--font-body); }
+      h1, h2, h3, h4, h5, h6 { font-family: var(--font-display); }
+      .page-shell { min-height: 100vh; display: flex; flex-direction: column; }
+      .admin-layout { display: flex; flex: 1; max-width: var(--max-content); width: 100%; margin: 0 auto; padding: 1.5rem; gap: 1.5rem; }
+      .admin-sidebar { width: var(--sidebar-width); flex-shrink: 0; }
+      .admin-main { flex: 1; min-width: 0; }
+      .admin-table { width: 100%; border-collapse: collapse; }
+      .admin-table th, .admin-table td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--aic-border-solid); }
+      .admin-table th { font-size: 0.75rem; font-weight: 600; color: var(--aic-muted-foreground); text-transform: uppercase; }
+      .admin-table td { font-size: 0.875rem; }
+      .admin-table tbody tr:hover { background-color: var(--aic-muted); }
+      .stat-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1rem; }
+      @media (max-width: 1024px) {
+        .admin-layout { flex-direction: column; }
+        .admin-sidebar { width: 100%; }
+        .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 640px) {
+        .admin-layout { padding: 1rem; }
+        .stat-grid { grid-template-columns: minmax(0, 1fr); }
+        .admin-table { display: block; overflow-x: auto; white-space: nowrap; }
+      }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] { display: inline-flex; align-items: center; justify-content: center; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; background-color: currentColor; }
+      .ambient-bg::before { content: ''; position: fixed; inset: 0; background: radial-gradient(ellipse 800px 600px at 15% 10%, rgba(99,102,241,0.07), transparent), radial-gradient(ellipse 700px 500px at 85% 20%, rgba(139,92,246,0.06), transparent), radial-gradient(ellipse 900px 700px at 50% 80%, rgba(99,102,241,0.04), transparent); pointer-events: none; z-index: 0; }
+      .admin-sidebar-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.8rem; border-radius: var(--aic-radius-medium); font-size: 0.875rem; color: var(--aic-muted-foreground); cursor: pointer; transition: all 0.15s; }
+      .admin-sidebar-item:hover { background-color: var(--aic-muted); color: var(--aic-foreground); }
+      .admin-sidebar-item.active { background-color: var(--aic-primary-light); color: var(--aic-primary); font-weight: 500; }
+      .admin-sidebar-section { padding: 0.6rem 0.8rem; font-size: 0.75rem; font-weight: 600; color: var(--aic-muted-foreground); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 0.5rem; }
+      .progress-track { height: 8px; background-color: var(--aic-border-solid); border-radius: 4px; overflow: hidden; }
+      .progress-fill { height: 100%; border-radius: 4px; }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased ambient-bg">
+  <div class="page-shell relative z-10">
+    <header class="sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md" style="border-color: var(--aic-border);">
+      <div class="mx-auto flex h-16 max-w-[var(--max-content)] items-center justify-between px-6">
+        <a href="index.html" data-dom-id="nav-home" class="flex items-center gap-2 text-lg font-bold text-primary" style="font-family: var(--font-display);">
+          <span class="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground text-sm">AI</span>
+          社区平台
+        </a>
+        <nav class="hidden items-center gap-1 md:flex">
+          <a href="index.html" data-dom-id="nav-gallery" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">作品大厅</a>
+          <a href="publish.html" data-dom-id="nav-publish" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">发布作品</a>
+          <a href="profile.html" data-dom-id="nav-profile" class="rounded-md px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">个人中心</a>
+          <a href="admin.html" data-dom-id="nav-admin" class="rounded-md px-3 py-2 text-sm font-medium text-foreground bg-primary/10">后台管理</a>
+        </nav>
+        <div class="flex items-center gap-3">
+          <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">管</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="admin-layout">
+      <!-- 左侧边栏 -->
+      <aside class="admin-sidebar">
+        <div class="rounded-xl border bg-card p-3 shadow-sm" style="border-color: var(--aic-border-solid);">
+          <div class="admin-sidebar-section">内容管理</div>
+          <a href="review.html" data-dom-id="nav-admin-review" class="admin-sidebar-item">
+            <i data-lucide="clipboard-list" class="h-4 w-4"></i> 作品审核
+          </a>
+          <div data-dom-id="nav-admin-category" class="admin-sidebar-item" data-target="admin-category">
+            <i data-lucide="folder" class="h-4 w-4"></i> 分类管理
+          </div>
+          <div data-dom-id="nav-admin-tag" class="admin-sidebar-item" data-target="admin-other">
+            <i data-lucide="tag" class="h-4 w-4"></i> 标签管理
+          </div>
+
+          <div class="admin-sidebar-section">用户与社区</div>
+          <div data-dom-id="nav-admin-user" class="admin-sidebar-item" data-target="admin-other">
+            <i data-lucide="users" class="h-4 w-4"></i> 用户管理
+          </div>
+          <div data-dom-id="nav-admin-report" class="admin-sidebar-item" data-target="admin-other">
+            <i data-lucide="flag" class="h-4 w-4"></i> 举报处理
+          </div>
+
+          <div class="admin-sidebar-section">运营</div>
+          <div data-dom-id="nav-admin-recommend" class="admin-sidebar-item" data-target="admin-recommend">
+            <i data-lucide="star" class="h-4 w-4"></i> 运营推荐
+          </div>
+          <div data-dom-id="nav-admin-stats" class="admin-sidebar-item active" data-target="admin-stats">
+            <i data-lucide="bar-chart-2" class="h-4 w-4"></i> 数据统计
+          </div>
+        </div>
+      </aside>
+
+      <!-- 右侧主内容区 -->
+      <main class="admin-main">
+        <!-- 数据统计 -->
+        <section id="admin-stats" class="admin-tab-content">
+          <div class="mb-2">
+            <h2 class="text-lg font-bold text-foreground">数据统计概览</h2>
+            <p class="text-sm text-muted-foreground">数据更新时间：2026-08-03 10:00</p>
+          </div>
+
+          <div class="stat-grid mb-6">
+            <div class="rounded-xl border bg-card p-4 text-center shadow-sm" style="border-color: var(--aic-border-solid);">
+              <div class="text-2xl font-bold text-primary">186</div>
+              <div class="text-xs text-muted-foreground">累计作品</div>
+              <div class="mt-1 text-xs font-medium text-[var(--state-success)]">↑ 本周 +12</div>
+            </div>
+            <div class="rounded-xl border bg-card p-4 text-center shadow-sm" style="border-color: var(--aic-border-solid);">
+              <div class="text-2xl font-bold text-[var(--aic-gradient-violet)]">1,247</div>
+              <div class="text-xs text-muted-foreground">注册用户</div>
+              <div class="mt-1 text-xs font-medium text-[var(--state-success)]">↑ 本周 +45</div>
+            </div>
+            <div class="rounded-xl border bg-card p-4 text-center shadow-sm" style="border-color: var(--aic-border-solid);">
+              <div class="text-2xl font-bold text-[var(--state-success)]">3,892</div>
+              <div class="text-xs text-muted-foreground">总下载量</div>
+              <div class="mt-1 text-xs font-medium text-[var(--state-success)]">↑ 本周 +236</div>
+            </div>
+            <div class="rounded-xl border bg-card p-4 text-center shadow-sm" style="border-color: var(--aic-border-solid);">
+              <div class="text-2xl font-bold text-[var(--state-warning)]">5</div>
+              <div class="text-xs text-muted-foreground">待审核</div>
+              <div class="mt-1 text-xs font-medium text-[var(--state-error)]">需及时处理</div>
+            </div>
+          </div>
+
+          <div class="mb-6 rounded-xl border bg-card p-6 shadow-sm" style="border-color: var(--aic-border-solid);">
+            <h3 class="mb-4 text-base font-semibold text-foreground">作品类型分布</h3>
+            <div class="space-y-4">
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>Skill</span><span class="font-semibold">48 (26%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 26%; background: linear-gradient(90deg, #6366f1, #8b5cf6);"></div></div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>智能体</span><span class="font-semibold">42 (23%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 23%; background: linear-gradient(90deg, #f59e0b, #ef4444);"></div></div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>提示词</span><span class="font-semibold">35 (19%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 19%; background: linear-gradient(90deg, #10b981, #06b6d4);"></div></div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>工作流</span><span class="font-semibold">28 (15%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 15%; background: linear-gradient(90deg, #8b5cf6, #ec4899);"></div></div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>应用程序</span><span class="font-semibold">19 (10%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 10%; background: linear-gradient(90deg, #06b6d4, #3b82f6);"></div></div>
+              </div>
+              <div>
+                <div class="mb-1 flex justify-between text-sm"><span>案例方案</span><span class="font-semibold">14 (7%)</span></div>
+                <div class="progress-track"><div class="progress-fill" style="width: 7%; background: linear-gradient(90deg, #f97316, #eab308);"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-xl border bg-card p-6 shadow-sm" style="border-color: var(--aic-border-solid);">
+            <h3 class="mb-4 text-base font-semibold text-foreground">热门作品 TOP 5（按下载量）</h3>
+            <div class="overflow-x-auto">
+              <table class="admin-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>作品名称</th>
+                    <th>类型</th>
+                    <th>作者</th>
+                    <th>下载</th>
+                    <th>点赞</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="font-semibold text-primary">1</td>
+                    <td class="font-medium text-foreground">营销文案生成 Prompt v2</td>
+                    <td><span class="inline-block rounded-md bg-[var(--state-success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-success)]">提示词</span></td>
+                    <td class="text-muted-foreground">李芳 · 市场部</td>
+                    <td>128</td>
+                    <td>63</td>
+                  </tr>
+                  <tr>
+                    <td class="font-semibold text-primary">2</td>
+                    <td class="font-medium text-foreground">智能财务问答 Bot</td>
+                    <td><span class="inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">智能体</span></td>
+                    <td class="text-muted-foreground">张明 · 财务部</td>
+                    <td>72</td>
+                    <td>87</td>
+                  </tr>
+                  <tr>
+                    <td class="font-semibold text-primary">3</td>
+                    <td class="font-medium text-foreground">客服工单自动分发流程</td>
+                    <td><span class="inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">工作流</span></td>
+                    <td class="text-muted-foreground">王伟 · 客服部</td>
+                    <td>47</td>
+                    <td>55</td>
+                  </tr>
+                  <tr>
+                    <td class="font-semibold text-primary">4</td>
+                    <td class="font-medium text-foreground">自动报表生成 Skill</td>
+                    <td><span class="inline-block rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">Skill</span></td>
+                    <td class="text-muted-foreground">张明 · 财务部</td>
+                    <td>35</td>
+                    <td>42</td>
+                  </tr>
+                  <tr>
+                    <td class="font-semibold text-primary">5</td>
+                    <td class="font-medium text-foreground">合同智能审查工具</td>
+                    <td><span class="inline-block rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">应用程序</span></td>
+                    <td class="text-muted-foreground">陈静 · 法务部</td>
+                    <td>31</td>
+                    <td>39</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 运营推荐 -->
+        <section id="admin-recommend" class="admin-tab-content hidden">
+          <div class="mb-4">
+            <h2 class="text-lg font-bold text-foreground">运营推荐管理</h2>
+            <p class="text-sm text-muted-foreground">推荐作品将展示在作品大厅顶部推荐位，最多 5 个。</p>
+          </div>
+          <div class="rounded-xl border bg-card p-6 shadow-sm" style="border-color: var(--aic-border-solid);">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between border-b pb-3" style="border-color: var(--aic-border-solid);">
+                <div class="flex items-center gap-3">
+                  <span class="font-bold text-primary">1</span>
+                  <div>
+                    <span class="text-sm font-semibold text-foreground">营销文案生成 Prompt v2</span>
+                    <span class="ml-2 inline-block rounded-md bg-[var(--state-success-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-success)]">提示词</span>
+                  </div>
+                </div>
+                <button data-dom-id="btn-remove-recommend-1" class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">取消推荐</button>
+              </div>
+              <div class="flex items-center justify-between border-b pb-3" style="border-color: var(--aic-border-solid);">
+                <div class="flex items-center gap-3">
+                  <span class="font-bold text-primary">2</span>
+                  <div>
+                    <span class="text-sm font-semibold text-foreground">智能财务问答 Bot</span>
+                    <span class="ml-2 inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">智能体</span>
+                  </div>
+                </div>
+                <button data-dom-id="btn-remove-recommend-2" class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">取消推荐</button>
+              </div>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <span class="font-bold text-primary">3</span>
+                  <div>
+                    <span class="text-sm font-semibold text-foreground">客服工单自动分发流程</span>
+                    <span class="ml-2 inline-block rounded-md bg-[var(--state-warning-bg)] px-2 py-0.5 text-xs font-medium text-[var(--state-warning)]">工作流</span>
+                  </div>
+                </div>
+                <button data-dom-id="btn-remove-recommend-3" class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">取消推荐</button>
+              </div>
+            </div>
+            <div class="my-5 border-t" style="border-color: var(--aic-border-solid);"></div>
+            <button data-dom-id="btn-add-recommend" class="inline-flex h-10 items-center gap-1 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-[var(--aic-primary-hover)]">
+              <i data-lucide="plus" class="h-4 w-4"></i> 添加推荐作品
+            </button>
+          </div>
+        </section>
+
+        <!-- 分类管理 -->
+        <section id="admin-category" class="admin-tab-content hidden">
+          <div class="mb-4">
+            <h2 class="text-lg font-bold text-foreground">分类管理</h2>
+          </div>
+          <div class="rounded-xl border bg-card p-6 shadow-sm" style="border-color: var(--aic-border-solid);">
+            <div class="mb-4 flex gap-2">
+              <input type="text" placeholder="输入新分类名称..." class="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring" style="border-color: var(--aic-border-solid); max-width: 240px;">
+              <button data-dom-id="btn-add-category" class="inline-flex h-10 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-[var(--aic-primary-hover)]">添加</button>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="admin-table">
+                <thead>
+                  <tr><th>分类名称</th><th>作品数</th><th>创建时间</th><th>操作</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td class="font-medium text-foreground">财务</td><td>32</td><td class="text-muted-foreground">2026-06-01</td><td><button class="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted" style="border-color: var(--aic-border-solid);">重命名</button><button class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">删除</button></td></tr>
+                  <tr><td class="font-medium text-foreground">客服</td><td>28</td><td class="text-muted-foreground">2026-06-01</td><td><button class="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted" style="border-color: var(--aic-border-solid);">重命名</button><button class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">删除</button></td></tr>
+                  <tr><td class="font-medium text-foreground">研发</td><td>45</td><td class="text-muted-foreground">2026-06-01</td><td><button class="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted" style="border-color: var(--aic-border-solid);">重命名</button><button class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">删除</button></td></tr>
+                  <tr><td class="font-medium text-foreground">市场</td><td>22</td><td class="text-muted-foreground">2026-06-01</td><td><button class="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted" style="border-color: var(--aic-border-solid);">重命名</button><button class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">删除</button></td></tr>
+                  <tr><td class="font-medium text-foreground">HR</td><td>15</td><td class="text-muted-foreground">2026-06-01</td><td><button class="mr-2 inline-flex h-8 items-center rounded-md border px-3 text-xs font-medium hover:bg-muted" style="border-color: var(--aic-border-solid);">重命名</button><button class="inline-flex h-8 items-center rounded-md bg-[var(--state-error-bg)] px-3 text-xs font-medium text-[var(--state-error)] hover:bg-[rgba(239,68,68,0.16)]">删除</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- 其他管理模块占位 -->
+        <section id="admin-other" class="admin-tab-content hidden">
+          <div class="flex flex-col items-center justify-center rounded-xl border bg-card p-12 text-center shadow-sm" style="border-color: var(--aic-border-solid);">
+            <div class="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-muted text-3xl">🔧</div>
+            <h3 class="text-base font-semibold text-foreground">模块功能示意</h3>
+            <p class="mt-2 max-w-md text-sm text-muted-foreground">该管理模块采用列表 + 详情面板的布局模式，与分类管理、运营推荐等模块保持一致的交互逻辑。</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script>
+    // 侧边栏切换
+    const sidebarItems = document.querySelectorAll('.admin-sidebar-item[data-target]');
+    const adminContents = document.querySelectorAll('.admin-tab-content');
+
+    sidebarItems.forEach(item => {
+      item.addEventListener('click', () => {
+        const target = item.dataset.target;
+        sidebarItems.forEach(i => i.classList.remove('active'));
+        item.classList.add('active');
+        adminContents.forEach(c => {
+          if (c.id === target) c.classList.remove('hidden');
+          else c.classList.add('hidden');
+        });
+      });
+    });
+
+    lucide.createIcons();
+  </script>
+</body>
+</html>

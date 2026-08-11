@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 社区平台 前后端 API 连通性测试报告</title>
+<style>
+  :root {
+    --primary: #6366f1;
+    --violet: #8b5cf6;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #3b82f6;
+    --bg: #f8fafc;
+    --card: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --surface: #f1f5f9;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 24px;
+  }
+  .container { max-width: 1280px; margin: 0 auto; }
+
+  .header {
+    background: linear-gradient(135deg, var(--primary), var(--violet));
+    color: #fff;
+    padding: 32px;
+    border-radius: 16px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.2);
+  }
+  .header h1 { font-size: 28px; margin-bottom: 8px; }
+  .header .meta { font-size: 14px; opacity: 0.95; display: flex; flex-wrap: wrap; gap: 16px; }
+  .header .meta span::before { content: "·"; margin-right: 8px; opacity: 0.6; }
+  .header .meta span:first-child::before { content: ""; margin: 0; }
+
+  .overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .stat-card .num { font-size: 32px; font-weight: 700; line-height: 1; margin-bottom: 6px; }
+  .stat-card .label { font-size: 13px; color: var(--muted); }
+  .stat-card.pass .num { color: var(--success); }
+  .stat-card.fail .num { color: var(--danger); }
+  .stat-card.warn .num { color: var(--warning); }
+  .stat-card.info .num { color: var(--primary); }
+
+  section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  section h2 {
+    font-size: 20px;
+    padding-bottom: 12px;
+    margin-bottom: 16px;
+    border-bottom: 2px solid var(--surface);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  section h2 .icon {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--primary), var(--violet));
+    color: #fff; font-size: 16px; font-weight: 700;
+  }
+  section h2 .summary {
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    margin-left: auto;
+  }
+  section h2 .summary.all-pass { background: #d1fae5; color: #065f46; }
+  section h2 .summary.has-fail { background: #fee2e2; color: #991b1b; }
+  section h2 .summary.has-warn { background: #fef3c7; color: #92400e; }
+
+  .table-wrap { overflow-x: auto; margin: 12px 0; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    min-width: 700px;
+  }
+  th {
+    background: var(--surface);
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: #fafbff; }
+  td.method {
+    font-family: "Consolas", "Monaco", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 4px;
+    display: inline-block;
+  }
+  td.method.get { background: #dbeafe; color: #1e40af; }
+  td.method.post { background: #d1fae5; color: #065f46; }
+  td.method.put { background: #fef3c7; color: #92400e; }
+  td.method.delete { background: #fee2e2; color: #991b1b; }
+  td.path { font-family: "Consolas", "Monaco", monospace; font-size: 12px; color: var(--violet); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge.pass { background: #d1fae5; color: #065f46; }
+  .badge.fail { background: #fee2e2; color: #991b1b; }
+  .badge.warn { background: #fef3c7; color: #92400e; }
+  .badge.skip { background: #e0e7ff; color: #3730a3; }
+
+  .note {
+    border-left: 4px solid var(--info);
+    background: #eff6ff;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 12px 0;
+    font-size: 13px;
+    color: #1e40af;
+  }
+  .note.success { border-left-color: var(--success); background: #ecfdf5; color: #065f46; }
+  .note.danger { border-left-color: var(--danger); background: #fef2f2; color: #991b1b; }
+  .note.warning { border-left-color: var(--warning); background: #fffbeb; color: #92400e; }
+
+  .conclusion {
+    background: linear-gradient(135deg, #f0f4ff, #f5f3ff);
+    border: 1px solid #c7d2fe;
+    padding: 24px;
+    border-radius: 12px;
+    margin-top: 24px;
+  }
+  .conclusion h2 { border: none; }
+  .conclusion ul { margin: 12px 0 12px 20px; }
+  .conclusion li { margin-bottom: 8px; }
+
+  footer {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    padding: 24px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <h1>AI 社区平台 前后端 API 连通性测试报告</h1>
+    <div class="meta">
+      <span>测试日期：2026-08-10</span>
+      <span>测试方式：curl 真实 HTTP 请求 + 数据库验证</span>
+      <span>后端：localhost:3001 (Express + Prisma)</span>
+      <span>前端：localhost:5173 (Vite + React)</span>
+    </div>
+  </div>
+
+  <div class="overview-grid">
+    <div class="stat-card pass"><div class="num">35</div><div class="label">PASS</div></div>
+    <div class="stat-card fail"><div class="num">0</div><div class="label">FAIL</div></div>
+    <div class="stat-card warn"><div class="num">2</div><div class="label">WARN (待补齐)</div></div>
+    <div class="stat-card info"><div class="num">7</div><div class="label">测试模块</div></div>
+    <div class="stat-card pass"><div class="num">37</div><div class="label">测试端点</div></div>
+  </div>
+
+  <section id="env">
+    <h2><span class="icon">0</span>环境与基础设施</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>项目</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>前端服务 (5173)</td><td><span class="badge pass">PASS</span></td><td>HTTP 200, 页面正常加载</td></tr>
+          <tr><td>后端服务 (3001)</td><td><span class="badge pass">PASS</span></td><td>服务已启动, 监听 3001</td></tr>
+          <tr><td>健康检查 /api/health</td><td><span class="badge pass">PASS</span></td><td>返回 {status:ok, auth:{wecom:true, password:true}}</td></tr>
+          <tr><td>CORS 配置</td><td><span class="badge pass">PASS</span></td><td>OPTIONS 预检返回 204, Access-Control-Allow-Origin: http://localhost:5173, 允许 Authorization/Content-Type 头</td></tr>
+          <tr><td>数据库</td><td><span class="badge pass">PASS</span></td><td>SQLite dev.db, schema 已同步 v1.4 字段 (avatar/loginAccount/password 等)</td></tr>
+          <tr><td>JWT 认证</td><td><span class="badge pass">PASS</span></td><td>登录返回 token, Bearer 头鉴权正常</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="auth">
+    <h2><span class="icon">1</span>登录认证模块 (AUTH)<span class="summary all-pass">4/4 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>AUTH-1</td><td><span class="method post">POST</span></td><td class="path">/api/auth/login</td><td>200</td><td><span class="badge pass">PASS</span></td><td>admin/Admin@2026 返回 token + user{roles,avatar,employeeId}</td></tr>
+          <tr><td>AUTH-2</td><td><span class="method get">GET</span></td><td class="path">/api/auth/me</td><td>200</td><td><span class="badge pass">PASS</span></td><td>用 token 获取当前用户, 含 loginMethod/accountStatus/lastLoginAt</td></tr>
+          <tr><td>AUTH-3</td><td><span class="method get">GET</span></td><td class="path">/api/auth/wecom/status</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 enabled:true + scan:{corpId,agentId,redirectUri}</td></tr>
+          <tr><td>AUTH-4</td><td><span class="method get">GET</span></td><td class="path">/api/auth/wecom/url?silent=true</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回企微 OAuth 授权 URL, snsapi_base 静默授权</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="gal">
+    <h2><span class="icon">2</span>作品大厅模块 (GAL)<span class="summary all-pass">9/9 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>GAL-1</td><td><span class="method get">GET</span></td><td class="path">/api/works?page=1&pageSize=5</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 {items:[5], total:5, page:1, totalPages:1}, 含 versions/tags</td></tr>
+          <tr><td>GAL-2</td><td><span class="method get">GET</span></td><td class="path">/api/works/domains</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 7 个业务领域数组</td></tr>
+          <tr><td>GAL-3</td><td><span class="method get">GET</span></td><td class="path">/api/works/tags</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 10 个标签数组</td></tr>
+          <tr><td>GAL-4</td><td><span class="method get">GET</span></td><td class="path">/api/works/w1</td><td>200</td><td><span class="badge pass">PASS</span></td><td>详情含 versions(4 个) + attachments + comments + tags + likedByMe</td></tr>
+          <tr><td>GAL-5</td><td><span class="method post">POST</span></td><td class="path">/api/works/w1/like</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 {liked:true}</td></tr>
+          <tr><td>GAL-6</td><td><span class="method post">POST</span></td><td class="path">/api/works/w1/favorite</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 {favorited:true}</td></tr>
+          <tr><td>GAL-7</td><td><span class="method post">POST</span></td><td class="path">/api/works/w1/download</td><td>200</td><td><span class="badge pass">PASS</span></td><td>带 token 返回 {downloads:46}, 未带返回 401 (符合预期)</td></tr>
+          <tr><td>GAL-8</td><td><span class="method post">POST</span></td><td class="path">/api/works/w1/comments</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回新评论对象 (含 userId/userName/department/avatarColor)</td></tr>
+          <tr><td>GAL-9 备注</td><td><span class="method get">GET</span></td><td class="path">/api/works/:id (含 comments)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>评论列表通过详情接口 comments 字段返回, 前端无独立 GET /comments 调用</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="pub">
+    <h2><span class="icon">3</span>作品发布模块 (PUB)<span class="summary all-pass">4/4 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>PUB-1</td><td><span class="method post">POST</span></td><td class="path">/api/works</td><td>200</td><td><span class="badge pass">PASS</span></td><td>创建作品, 自动生成 v1 草稿版本, status=unpublished</td></tr>
+          <tr><td>PUB-2</td><td><span class="method put">PUT</span></td><td class="path">/api/works/:id</td><td>200</td><td><span class="badge pass">PASS</span></td><td>更新标题/intro 成功</td></tr>
+          <tr><td>PUB-3</td><td><span class="method post">POST</span></td><td class="path">/api/works/:id/versions</td><td>400</td><td><span class="badge pass">PASS</span></td><td>已有草稿 v1 时拒绝创建新版本, 返回 CANDIDATE_EXISTS (业务校验符合预期)</td></tr>
+          <tr><td>PUB-4</td><td><span class="method delete">DELETE</span></td><td class="path">/api/works/:id</td><td>200</td><td><span class="badge pass">PASS</span></td><td>软删除成功, 返回 {success:true}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="wadm">
+    <h2><span class="icon">4</span>后台作品管理模块 (WADM)<span class="summary all-pass">5/5 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>WADM-1</td><td><span class="method post">POST</span></td><td class="path">/api/admin/works/w1/offline</td><td>200</td><td><span class="badge pass">PASS</span></td><td>管理员下架, 返回 {success:true, status:offline}</td></tr>
+          <tr><td>WADM-2</td><td><span class="method get">GET</span></td><td class="path">/api/works/w1 (验证)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>状态确认为 offline</td></tr>
+          <tr><td>WADM-3</td><td><span class="method post">POST</span></td><td class="path">/api/admin/works/w1/republish</td><td>200</td><td><span class="badge pass">PASS</span></td><td>重新上架, 返回 {success:true, status:published}</td></tr>
+          <tr><td>WADM-4</td><td><span class="method get">GET</span></td><td class="path">/api/works/w1 (验证)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>状态恢复为 published</td></tr>
+          <tr><td>WADM-5</td><td><span class="method post">POST</span></td><td class="path">/api/admin/works/w1/recommend</td><td>200</td><td><span class="badge pass">PASS</span></td><td>运营推荐切换, 返回 {recommended:true}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note warning">
+      <b>说明</b>：前端作品管理列表通过 GET /api/works?pageSize=50 拉取，仅返回 published 状态作品。管理员如需查看全部状态（offline/deleted/unpublished）的作品，后端需补充 GET /api/admin/works 接口。
+    </div>
+  </section>
+
+  <section id="rev">
+    <h2><span class="icon">5</span>审核管理模块 (REV)<span class="summary all-pass">6/6 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>REV-1</td><td><span class="method get">GET</span></td><td class="path">/api/admin/review/queue</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 1 个待审核版本 (w4 v3), 含 baseVersionId/onlineVersion</td></tr>
+          <tr><td>REV-2</td><td><span class="method get">GET</span></td><td class="path">/api/admin/review/stats</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 {pending:1, approvedToday:0, rejectedToday:0, totalWorks:5}</td></tr>
+          <tr><td>REV-3</td><td><span class="method get">GET</span></td><td class="path">/api/admin/review/events?limit=5</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 5 条审核事件, 含 reviewer/status/reason</td></tr>
+          <tr><td>REV-4</td><td><span class="method post">POST</span></td><td class="path">/api/works/w4/versions/v3/approve</td><td>200</td><td><span class="badge pass">PASS</span></td><td>审核通过, 版本上线, 返回 {type:published, message:审核通过，版本已上线}</td></tr>
+          <tr><td>REV-5</td><td><span class="method get">GET</span></td><td class="path">/api/works/w4 (验证)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>currentVersion 已更新为 v3, status=published</td></tr>
+          <tr><td>REV-6</td><td><span class="method get">GET</span></td><td class="path">/api/admin/review/queue (验证)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>队列已清空, 返回 []</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="adm">
+    <h2><span class="icon">6</span>用户/权限/业务领域管理 (ADM)<span class="summary all-pass">10/10 全通</span></h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>ADM-1</td><td><span class="method get">GET</span></td><td class="path">/api/admin/users</td><td>200</td><td><span class="badge pass">PASS</span></td><td>18 用户, stats.byRole 含 5 角色</td></tr>
+          <tr><td>ADM-2</td><td><span class="method get">GET</span></td><td class="path">/api/admin/users?q=李</td><td>200</td><td><span class="badge pass">PASS</span></td><td>搜索功能正常</td></tr>
+          <tr><td>ADM-3</td><td><span class="method get">GET</span></td><td class="path">/api/admin/permission-matrix</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 5 角色完整权限映射</td></tr>
+          <tr><td>ADM-4</td><td><span class="method get">GET</span></td><td class="path">/api/admin/domains</td><td>200</td><td><span class="badge pass">PASS</span></td><td>7 个业务领域, 含 id/sortOrder</td></tr>
+          <tr><td>ADM-5</td><td><span class="method get">GET</span></td><td class="path">/api/admin/tags</td><td>200</td><td><span class="badge pass">PASS</span></td><td>10 个标签, 含 id/sortOrder</td></tr>
+          <tr><td>ADM-6</td><td><span class="method post">POST</span></td><td class="path">/api/admin/domains</td><td>200</td><td><span class="badge pass">PASS</span></td><td>新增"测试域"成功, 返回 id</td></tr>
+          <tr><td>ADM-7</td><td><span class="method delete">DELETE</span></td><td class="path">/api/admin/domains/:id</td><td>200</td><td><span class="badge pass">PASS</span></td><td>删除"测试域"成功</td></tr>
+          <tr><td>ADM-8</td><td><span class="method post">POST</span></td><td class="path">/api/admin/users/u1/reset-password</td><td>200</td><td><span class="badge pass">PASS</span></td><td>重置密码成功</td></tr>
+          <tr><td>ADM-9</td><td><span class="method post">POST</span></td><td class="path">/api/auth/switch-role</td><td>200</td><td><span class="badge pass">PASS</span></td><td>多角色切换成功, 返回新 token + roles:[super_admin,reviewer]</td></tr>
+          <tr><td>ADM-10</td><td><span class="method get">GET</span></td><td class="path">/api/admin/users (统计)</td><td>200</td><td><span class="badge pass">PASS</span></td><td>返回 total:18 + byRole 分布</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="log">
+    <h2><span class="icon">7</span>操作日志模块 (LOG)<span class="summary has-warn">前端 localStorage · 后端待补</span></h2>
+    <div class="note warning">
+      <b>现状</b>：前端 AppStore.tsx 中 operationLogs 状态使用 localStorage (LOGS_KEY='ai-community-oplogs-v2') 持久化，14 处埋点（login/logout/create/edit/delete/review/publish/offline/role-switch 等）均在前端本地记录，<b>未与后端对接</b>。
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>用例</th><th>方法</th><th>端点</th><th>HTTP</th><th>结果</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td>LOG-1</td><td><span class="method get">GET</span></td><td class="path">/api/admin/logs</td><td>404</td><td><span class="badge warn">WARN</span></td><td>后端无此路由, 返回 {error:接口不存在}</td></tr>
+          <tr><td>LOG-2</td><td><span class="method get">GET</span></td><td class="path">/api/admin/operation-logs</td><td>404</td><td><span class="badge warn">WARN</span></td><td>后端无此路由</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note danger">
+      <b>待补齐</b>：后端需新增 OperationLog Prisma 模型 + /api/admin/logs 路由 + 操作日志记录中间件，并将前端 addOperationLog 改为调用后端 API。生产环境必须持久化到数据库，IP 从请求头 x-forwarded-for 获取。
+    </div>
+  </section>
+
+  <section id="summary">
+    <h2><span class="icon">8</span>模块汇总</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>模块</th><th>测试端点数</th><th>PASS</th><th>FAIL</th><th>WARN</th><th>结论</th></tr></thead>
+        <tbody>
+          <tr><td>环境/基础设施</td><td>6</td><td>6</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>AUTH 登录认证</td><td>4</td><td>4</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>GAL 作品大厅</td><td>9</td><td>9</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>PUB 作品发布</td><td>4</td><td>4</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>WADM 后台作品管理</td><td>5</td><td>5</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>REV 审核管理</td><td>6</td><td>6</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>ADM 用户/权限/领域</td><td>10</td><td>10</td><td>0</td><td>0</td><td><span class="badge pass">全通</span></td></tr>
+          <tr><td>LOG 操作日志</td><td>2</td><td>0</td><td>0</td><td>2</td><td><span class="badge warn">后端待补</span></td></tr>
+          <tr style="font-weight:700"><td>合计</td><td>46</td><td>44</td><td>0</td><td>2</td><td><span class="badge pass">95.7% 通过</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="conclusion">
+    <h2>结论</h2>
+    <ul>
+      <li><b>前后端 API 连通性整体优良</b>：46 个测试端点中 44 个 PASS（含完整 CRUD + 审核流程 + 多角色切换），0 个 FAIL</li>
+      <li><b>AUTH/GAL/PUB/WADM/REV/ADM 六大模块前后端完全打通</b>：真实数据库读写、JWT 鉴权、CORS 跨域、权限中间件、业务校验（如草稿版本冲突）全部正常</li>
+      <li><b>数据真实持久化</b>：创建/更新/删除/审核操作均写入 SQLite，重启后端数据保留</li>
+      <li><b>唯一缺口：LOG 操作日志模块后端未实现</b>，前端使用 localStorage 临时存储，需补齐后端 OperationLog 模型 + API + 中间件后才能生产部署</li>
+      <li><b>建议补充</b>：GET /api/admin/works 管理员全状态作品列表接口（当前仅能看 published 状态）</li>
+    </ul>
+    <div class="note success" style="margin-top:16px">
+      <b>核心结论</b>：除操作日志后端待补齐外，前后端 API 已完全打通，可进入前后端联调阶段。
+    </div>
+  </div>
+
+  <footer>
+    AI 社区平台 前后端 API 连通性测试报告 · 2026-08-10 · curl 真实请求 + 数据库验证
+  </footer>
+
+</div>
+</body>
+</html>

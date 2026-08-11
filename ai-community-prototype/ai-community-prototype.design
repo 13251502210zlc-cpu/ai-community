@@ -1,0 +1,398 @@
+{
+  "data": [
+    {
+      "id": "page-index",
+      "title": "作品大厅",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1017,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-4a8c806a",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/index.html",
+        "interactions": [
+          {
+            "domId": "nav-publish",
+            "targetPageId": "page-publish",
+            "hideEdge": true,
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "btn-publish",
+            "targetPageId": "page-publish",
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "nav-profile",
+            "targetPageId": "page-profile",
+            "hideEdge": true,
+            "transitionLabel": "个人中心"
+          },
+          {
+            "domId": "nav-admin",
+            "targetPageId": "page-admin",
+            "hideEdge": true,
+            "transitionLabel": "后台管理"
+          },
+          {
+            "domId": "card-work-1",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-work-2",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-work-3",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-work-4",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-work-5",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-work-6",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-publish",
+      "title": "发布作品",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1491,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-322fb831",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/publish.html",
+        "interactions": [
+          {
+            "domId": "nav-home",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-gallery",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-profile",
+            "targetPageId": "page-profile",
+            "hideEdge": true,
+            "transitionLabel": "个人中心"
+          },
+          {
+            "domId": "nav-admin",
+            "targetPageId": "page-admin",
+            "hideEdge": true,
+            "transitionLabel": "后台管理"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-review",
+      "title": "审核管理",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1090,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-e93f5d4c",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/review.html",
+        "interactions": [
+          {
+            "domId": "nav-home",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-gallery",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-publish",
+            "targetPageId": "page-publish",
+            "hideEdge": true,
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "nav-profile",
+            "targetPageId": "page-profile",
+            "hideEdge": true,
+            "transitionLabel": "个人中心"
+          },
+          {
+            "domId": "nav-admin",
+            "targetPageId": "page-admin",
+            "hideEdge": true,
+            "transitionLabel": "后台管理"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-detail",
+      "title": "作品详情",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1057,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-17a6e61b",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/detail.html",
+        "interactions": [
+          {
+            "domId": "nav-home",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-gallery",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-publish",
+            "targetPageId": "page-publish",
+            "hideEdge": true,
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "nav-profile",
+            "targetPageId": "page-profile",
+            "hideEdge": true,
+            "transitionLabel": "个人中心"
+          },
+          {
+            "domId": "nav-admin",
+            "targetPageId": "page-admin",
+            "hideEdge": true,
+            "transitionLabel": "后台管理"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-profile",
+      "title": "个人中心",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 901,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-65daa5f9",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/profile.html",
+        "interactions": [
+          {
+            "domId": "nav-home",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-gallery",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-publish",
+            "targetPageId": "page-publish",
+            "hideEdge": true,
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "nav-admin",
+            "targetPageId": "page-admin",
+            "hideEdge": true,
+            "transitionLabel": "后台管理"
+          },
+          {
+            "domId": "btn-publish-new",
+            "targetPageId": "page-publish",
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "btn-goto-edit",
+            "targetPageId": "page-publish",
+            "transitionLabel": "编辑作品"
+          },
+          {
+            "domId": "card-fav-1",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-fav-2",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-like-1",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "card-like-2",
+            "targetPageId": "page-detail",
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "timeline-1",
+            "targetPageId": "page-detail",
+            "hideEdge": true,
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "timeline-2",
+            "targetPageId": "page-detail",
+            "hideEdge": true,
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "timeline-3",
+            "targetPageId": "page-detail",
+            "hideEdge": true,
+            "transitionLabel": "作品详情"
+          },
+          {
+            "domId": "timeline-4",
+            "targetPageId": "page-detail",
+            "hideEdge": true,
+            "transitionLabel": "作品详情"
+          }
+        ]
+      }
+    },
+    {
+      "id": "page-admin",
+      "title": "后台管理",
+      "type": "page",
+      "version": 1,
+      "createdAt": 1754192100000,
+      "canvasData": {
+        "x": 0,
+        "y": 0,
+        "group": 0,
+        "layoutSnapshot": {
+          "version": 1,
+          "contentHeight": 1042,
+          "viewportWidth": 1440,
+          "sourceHash": "fnv1a-73e0399c",
+          "measuredAt": 1785733559000
+        }
+      },
+      "devMetadata": {
+        "htmlSrc": "pages/admin.html",
+        "interactions": [
+          {
+            "domId": "nav-home",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-gallery",
+            "targetPageId": "page-index",
+            "hideEdge": true,
+            "transitionLabel": "作品大厅"
+          },
+          {
+            "domId": "nav-publish",
+            "targetPageId": "page-publish",
+            "hideEdge": true,
+            "transitionLabel": "发布作品"
+          },
+          {
+            "domId": "nav-profile",
+            "targetPageId": "page-profile",
+            "hideEdge": true,
+            "transitionLabel": "个人中心"
+          },
+          {
+            "domId": "nav-admin-review",
+            "targetPageId": "page-review",
+            "transitionLabel": "审核管理"
+          }
+        ]
+      }
+    }
+  ],
+  "config": {
+    "autoLayout": true,
+    "deviceType": "desktop",
+    "projectName": "AI 社区平台原型",
+    "designLibrary": null
+  }
+}

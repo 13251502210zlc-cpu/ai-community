@@ -1,0 +1,310 @@
+// AI 社区平台数据模型（v1.3）
+// 数据库：SQLite（开发）/ PostgreSQL（生产）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ==================== 用户与角色 ====================
+
+// v1.3：角色采用平行可叠加模型（5 个系统角色彼此独立、互不继承）
+// 这里用单字段 role 表示当前主角色；多角色叠加可扩展为 UserRole 关联表
+model User {
+  id          String   @id @default(cuid())
+  name        String
+  department  String
+  position    String
+  role        String   @default("user") // user | creator | reviewer | operator | super_admin
+  avatarColor String   @default("#2563eb")
+  avatar      String?  // v1.4：企业微信头像 URL
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // v1.4：登录认证字段
+  wecomUserId   String?  // 企业微信 UserId（OAuth 登录匹配用）
+  employeeId    String?  // 工号
+  loginMethod   String   @default("wecom")  // wecom | password | both
+  accountStatus String   @default("active") // active | disabled | locked
+  loginAccount  String?  // 账号密码登录账号（工号或邮箱）
+  password      String?  // 密码（生产环境应哈希存储）
+  failedLoginCount Int   @default(0)
+  lockedUntil   DateTime?
+  lastLoginAt   DateTime?
+
+  comments        Comment[]
+  reviewEvents    ReviewEvent[]
+  reviewedVersions WorkVersion[]
+  likes           UserLike[]
+  favorites       UserFavorite[]
+  worksAuthored   Work[]      @relation("WorkAuthor")
+  // 反向：被分配的角色（多角色叠加时启用）
+  assignedRoles   UserRole[]
+
+  @@unique([wecomUserId])
+  @@unique([loginAccount])
+  @@index([employeeId])
+}
+
+// v1.3：多角色叠加（一个用户可同时拥有多个管理角色）
+model UserRole {
+  id     String @id @default(cuid())
+  userId String
+  role   String // user | creator | reviewer | operator | super_admin
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([userId])
+}
+
+model RolePermission {
+  role       String
+  permission String
+  allowed    Boolean  @default(true)
+  updatedAt  DateTime @updatedAt
+
+  @@id([role, permission])
+  @@index([role])
+}
+
+// ==================== 业务领域与标签 ====================
+
+model BusinessDomain {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  works     Work[]
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  works     Work[]
+}
+
+// ==================== 作品与版本 ====================
+
+// v1.1：双层状态模型——作品状态决定是否在大厅可见
+model Work {
+  id            String   @id @default(cuid())
+  title         String
+  type          String   // skill | app | agent | prompt | workflow | case
+  // 业务领域（关联）
+  category      String
+  domain        BusinessDomain? @relation(fields: [category], references: [name])
+  // 标签（多对多）
+  tags          Tag[]
+  intro         String
+  // 作者
+  authorId      String
+  author        User     @relation("WorkAuthor", fields: [authorId], references: [id])
+  authorName    String
+  department    String
+  // 作品状态
+  status        String   @default("unpublished") // unpublished | published | offline | deleted
+  // 当前线上版本号
+  currentVersion String?
+  coverUrl      String?
+  usage         String   @default("")
+  businessValue String?
+  scene         String?
+  coreAbilities String?  // JSON 数组字符串
+  // 互动数据（作品级，版本替换时继承不清零）
+  likes         Int      @default(0)
+  favorites     Int      @default(0)
+  downloads     Int      @default(0)
+  views         Int      @default(0)
+  recommended   Boolean  @default(false)
+  // 时间
+  createdAt     DateTime @default(now())
+  publishedAt   DateTime?
+
+  versions    WorkVersion[]
+  attachments Attachment[]
+  comments    Comment[]
+  events      ReviewEvent[]
+  likesRel    UserLike[]
+  favsRel     UserFavorite[]
+
+  @@index([status])
+  @@index([type])
+  @@index([authorId])
+}
+
+// v1.1：版本独立管理状态；v1.3：增加 baseVersionId 与 candidate 字段
+model WorkVersion {
+  id             String   @id @default(cuid())
+  workId         String
+  work           Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  version        String   // v1 / v2 / v3 ...（服务端原子生成）
+  changelog      String   @default("")
+  status         String   @default("draft") // draft | pending | passed | rejected
+  current        Boolean  @default(false) // 是否为当前线上版本
+  candidate      Boolean  @default(false) // v1.3：审核通过但因作品下架或并发未自动上线
+  changelogAuthor String?
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  reviewerId     String?
+  reviewer       User?    @relation(fields: [reviewerId], references: [id])
+  rejectReason   String?
+  // v1.3：创建该版本时记录的线上版本号，用于审核通过时并发校验
+  baseVersionId  String?
+  createdAt      DateTime @default(now())
+
+  // 提交审核时使用的不可变内容快照；草稿阶段可编辑，审核通过后复制到 Work 线上记录
+  title          String?
+  type           String?
+  category       String?
+  tagsJson       String?  // JSON string[]
+  intro          String?
+  usage          String?
+  businessValue  String?
+  scene          String?
+  coreAbilities  String?  // JSON string[]
+  coverUrl       String?
+  attachments    Attachment[]
+
+  @@unique([workId, version])
+  @@index([workId])
+  @@index([status])
+}
+
+// ==================== 附件 ====================
+
+model Attachment {
+  id        String   @id @default(cuid())
+  workId    String
+  work      Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  versionId String?
+  version   WorkVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  uploaderId String?
+  name      String
+  url       String?
+  storedName String?
+  size      String   @default("0 KB")
+  downloads Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([workId])
+  @@index([versionId])
+}
+
+model PendingUpload {
+  id         String   @id @default(cuid())
+  storedName String   @unique
+  uploaderId String
+  name       String
+  size       String
+  url        String
+  createdAt  DateTime @default(now())
+
+  @@index([uploaderId])
+  @@index([createdAt])
+}
+
+// ==================== 评论 ====================
+
+model Comment {
+  id          String   @id @default(cuid())
+  workId      String
+  work        Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  userName    String
+  department  String
+  avatarColor String
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([workId])
+}
+
+// ==================== 审核事件日志 ====================
+
+model ReviewEvent {
+  id            String   @id @default(cuid())
+  workId        String
+  work          Work     @relation(fields: [workId], references: [id], onDelete: Cascade)
+  workTitle     String
+  version       String
+  status        String   // submitted | approved | rejected
+  reviewerId    String?
+  reviewer      User?    @relation(fields: [reviewerId], references: [id])
+  reason        String?
+  isFirstVersion Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([workId])
+  @@index([status])
+}
+
+// ==================== 操作日志 ====================
+
+// v2.0：操作日志后端持久化（前端 14 处埋点改为调用后端 API）
+// 日志为不可变历史记录，保留 180 天后归档；不建立外键关联，避免用户删除影响日志留存
+model OperationLog {
+  id            String   @id @default(cuid())
+  time          DateTime // 操作时间
+  operatorId    String   // 操作人 ID
+  operatorName  String   // 操作人姓名
+  department    String   // 操作人部门
+  role          String   // 操作人角色（展示用，多角色逗号分隔）
+  module        String   // 模块（作品大厅/作品发布/审核管理/作品详情/个人中心/后台管理/登录认证）
+  action        String   // 操作类型（创建/更新/删除/审核/上架下架/登录登出/角色分配）
+  content       String   // 操作内容
+  target        String   // 操作对象
+  ip            String   // IP 地址
+  result        String   // success | failed
+  createdAt     DateTime @default(now())
+
+  @@index([time])
+  @@index([operatorId])
+  @@index([module])
+}
+
+model ArchivedOperationLog {
+  id           String   @id @default(cuid())
+  originalId   String   @unique
+  time         DateTime
+  operatorId   String
+  operatorName String
+  department   String
+  role         String
+  module       String
+  action       String
+  content      String
+  target       String
+  ip           String
+  result       String
+  archivedAt   DateTime @default(now())
+
+  @@index([time])
+  @@index([operatorId])
+}
+
+// ==================== 用户互动关系 ====================
+
+model UserLike {
+  userId String
+  workId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  work   Work   @relation(fields: [workId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workId])
+}
+
+model UserFavorite {
+  userId String
+  workId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  work   Work   @relation(fields: [workId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workId])
+}

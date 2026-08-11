@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Preflight</title>
+    <style id="theme-vars">
+/* AI 社区平台 — 产品原型品牌样式
+   源自 PRD "Fresh Gradient / AI Tech" 主题 */
+
+/* === Font faces === */
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'DMMono';
+  src: local('DMMono'), local('DM Mono');
+  font-weight: 400;
+}
+
+/* === Theme variables === */
+:root {
+  /* Background & surfaces */
+  --aic-background: #f7f8fc;
+  --aic-background-2: rgba(255, 255, 255, 0.72);
+  --aic-surface: #ffffff;
+  --aic-surface-elevated: #eef0f8;
+
+  /* Foreground */
+  --aic-foreground: #1a1b2e;
+  --aic-muted-foreground: #6b7280;
+
+  /* Primary brand (indigo) */
+  --aic-primary: #6366f1;
+  --aic-primary-foreground: #ffffff;
+  --aic-primary-light: rgba(99, 102, 241, 0.08);
+  --aic-primary-hover: #4f46e5;
+
+  /* Gradient partner (violet) — used only for decorative gradients, not as a second identity color */
+  --aic-gradient-violet: #8b5cf6;
+
+  /* Cards / popovers */
+  --aic-card: #ffffff;
+  --aic-card-foreground: #1a1b2e;
+  --aic-popover: #ffffff;
+  --aic-popover-foreground: #1a1b2e;
+
+  /* Muted */
+  --aic-muted: #f3f4f6;
+  --aic-muted-foreground: #6b7280;
+
+  /* Borders / inputs */
+  --aic-border: rgba(99, 102, 241, 0.12);
+  --aic-border-solid: #e5e7eb;
+  --aic-input: #e5e7eb;
+  --aic-ring: #6366f1;
+
+  /* State colors */
+  --state-success: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.08);
+  --state-warning: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.08);
+  --state-error: #ef4444;
+  --state-error-bg: rgba(239, 68, 68, 0.08);
+  --state-info: #06b6d4;
+  --state-info-bg: rgba(6, 182, 212, 0.08);
+
+  /* Radius */
+  --aic-radius-small: 4px;
+  --aic-radius-medium: 8px;
+  --aic-radius-large: 12px;
+
+  /* Typography */
+  --font-display: 'InstrumentSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'WorkSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'DMMono', 'Consolas', monospace;
+
+  /* Layout helpers */
+  --max-content: 1120px;
+  --sidebar-width: 240px;
+}
+
+/* === Light mode (default) === */
+html.light {
+  color-scheme: light;
+}
+
+/* === Dark mode support === */
+html.dark {
+  color-scheme: dark;
+  --aic-background: #11131f;
+  --aic-background-2: rgba(255, 255, 255, 0.05);
+  --aic-surface: #1a1b2e;
+  --aic-surface-elevated: #23253a;
+  --aic-foreground: #f3f4f6;
+  --aic-muted-foreground: #9ca3af;
+  --aic-card: #1a1b2e;
+  --aic-card-foreground: #f3f4f6;
+  --aic-popover: #1a1b2e;
+  --aic-popover-foreground: #f3f4f6;
+  --aic-muted: #23253a;
+  --aic-border: rgba(99, 102, 241, 0.22);
+  --aic-border-solid: #374151;
+  --aic-input: #374151;
+}
+
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.1/dist/index.global.js"></script>
+    <script src="https://unpkg.com/lucide@1.8.0/dist/umd/lucide.min.js"></script>
+    <style type="text/tailwindcss">
+  @theme inline {
+    --color-background: var(--aic-background);
+    --color-foreground: var(--aic-foreground);
+    --color-card: var(--aic-card);
+    --color-card-foreground: var(--aic-card-foreground);
+    --color-popover: var(--aic-popover);
+    --color-popover-foreground: var(--aic-popover-foreground);
+    --color-primary: var(--aic-primary);
+    --color-primary-foreground: var(--aic-primary-foreground);
+    --color-muted: var(--aic-muted);
+    --color-muted-foreground: var(--aic-muted-foreground);
+    --color-border: var(--aic-border);
+    --color-input: var(--aic-input);
+    --color-ring: var(--aic-ring);
+    --radius-sm: var(--aic-radius-small);
+    --radius-md: var(--aic-radius-medium);
+    --radius-lg: var(--aic-radius-large);
+  }
+  @layer base {
+    body { background: var(--aic-background); color: var(--aic-foreground); }
+    td, th { @apply break-words; word-break: break-all; word-break: auto-phrase; }
+    th { @apply whitespace-nowrap; }
+  }
+    </style>
+    <style id="semantic-token-fallback">
+      .bg-background { background-color: var(--aic-background); }
+      .text-background { color: var(--aic-background); }
+      .border-background { border-color: var(--aic-background); }
+      .ring-background { --tw-ring-color: var(--aic-background); }
+      .bg-foreground { background-color: var(--aic-foreground); }
+      .text-foreground { color: var(--aic-foreground); }
+      .border-foreground { border-color: var(--aic-foreground); }
+      .ring-foreground { --tw-ring-color: var(--aic-foreground); }
+      .bg-card { background-color: var(--aic-card); }
+      .text-card { color: var(--aic-card); }
+      .border-card { border-color: var(--aic-card); }
+      .ring-card { --tw-ring-color: var(--aic-card); }
+      .bg-card-foreground { background-color: var(--aic-card-foreground); }
+      .text-card-foreground { color: var(--aic-card-foreground); }
+      .border-card-foreground { border-color: var(--aic-card-foreground); }
+      .ring-card-foreground { --tw-ring-color: var(--aic-card-foreground); }
+      .bg-popover { background-color: var(--aic-popover); }
+      .text-popover { color: var(--aic-popover); }
+      .border-popover { border-color: var(--aic-popover); }
+      .ring-popover { --tw-ring-color: var(--aic-popover); }
+      .bg-popover-foreground { background-color: var(--aic-popover-foreground); }
+      .text-popover-foreground { color: var(--aic-popover-foreground); }
+      .border-popover-foreground { border-color: var(--aic-popover-foreground); }
+      .ring-popover-foreground { --tw-ring-color: var(--aic-popover-foreground); }
+      .bg-primary { background-color: var(--aic-primary); }
+      .text-primary { color: var(--aic-primary); }
+      .border-primary { border-color: var(--aic-primary); }
+      .ring-primary { --tw-ring-color: var(--aic-primary); }
+      .bg-primary-foreground { background-color: var(--aic-primary-foreground); }
+      .text-primary-foreground { color: var(--aic-primary-foreground); }
+      .border-primary-foreground { border-color: var(--aic-primary-foreground); }
+      .ring-primary-foreground { --tw-ring-color: var(--aic-primary-foreground); }
+      .bg-muted { background-color: var(--aic-muted); }
+      .text-muted { color: var(--aic-muted); }
+      .border-muted { border-color: var(--aic-muted); }
+      .ring-muted { --tw-ring-color: var(--aic-muted); }
+      .bg-muted-foreground { background-color: var(--aic-muted-foreground); }
+      .text-muted-foreground { color: var(--aic-muted-foreground); }
+      .border-muted-foreground { border-color: var(--aic-muted-foreground); }
+      .ring-muted-foreground { --tw-ring-color: var(--aic-muted-foreground); }
+      .bg-border { background-color: var(--aic-border); }
+      .text-border { color: var(--aic-border); }
+      .border-border { border-color: var(--aic-border); }
+      .ring-border { --tw-ring-color: var(--aic-border); }
+      .bg-input { background-color: var(--aic-input); }
+      .text-input { color: var(--aic-input); }
+      .border-input { border-color: var(--aic-input); }
+      .ring-input { --tw-ring-color: var(--aic-input); }
+      .bg-ring { background-color: var(--aic-ring); }
+      .text-ring { color: var(--aic-ring); }
+      .border-ring { border-color: var(--aic-ring); }
+      .ring-ring { --tw-ring-color: var(--aic-ring); }
+    </style>
+    <style>
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        -webkit-mask-size: contain;
+        mask-size: contain;
+        -webkit-mask-repeat: no-repeat;
+        mask-repeat: no-repeat;
+        -webkit-mask-position: center;
+        mask-position: center;
+        background-color: currentColor;
+      }
+    </style>
+</head>
+<body class="min-h-screen font-sans antialiased">
+    <main>
+    </main>
+    <script>lucide.createIcons();</script>
+</body>
+</html>

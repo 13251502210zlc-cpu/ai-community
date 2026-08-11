@@ -1,0 +1,115 @@
+/* AI 社区平台 — 产品原型品牌样式
+   源自 PRD "Fresh Gradient / AI Tech" 主题 */
+
+/* === Font faces === */
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'InstrumentSans';
+  src: local('InstrumentSans'), local('Instrument Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 400;
+}
+@font-face {
+  font-family: 'WorkSans';
+  src: local('WorkSans'), local('Work Sans');
+  font-weight: 700;
+}
+@font-face {
+  font-family: 'DMMono';
+  src: local('DMMono'), local('DM Mono');
+  font-weight: 400;
+}
+
+/* === Theme variables === */
+:root {
+  /* Background & surfaces */
+  --aic-background: #f7f8fc;
+  --aic-background-2: rgba(255, 255, 255, 0.72);
+  --aic-surface: #ffffff;
+  --aic-surface-elevated: #eef0f8;
+
+  /* Foreground */
+  --aic-foreground: #1a1b2e;
+  --aic-muted-foreground: #6b7280;
+
+  /* Primary brand (indigo) */
+  --aic-primary: #6366f1;
+  --aic-primary-foreground: #ffffff;
+  --aic-primary-light: rgba(99, 102, 241, 0.08);
+  --aic-primary-hover: #4f46e5;
+
+  /* Gradient partner (violet) — used only for decorative gradients, not as a second identity color */
+  --aic-gradient-violet: #8b5cf6;
+
+  /* Cards / popovers */
+  --aic-card: #ffffff;
+  --aic-card-foreground: #1a1b2e;
+  --aic-popover: #ffffff;
+  --aic-popover-foreground: #1a1b2e;
+
+  /* Muted */
+  --aic-muted: #f3f4f6;
+  --aic-muted-foreground: #6b7280;
+
+  /* Borders / inputs */
+  --aic-border: rgba(99, 102, 241, 0.12);
+  --aic-border-solid: #e5e7eb;
+  --aic-input: #e5e7eb;
+  --aic-ring: #6366f1;
+
+  /* State colors */
+  --state-success: #10b981;
+  --state-success-bg: rgba(16, 185, 129, 0.08);
+  --state-warning: #f59e0b;
+  --state-warning-bg: rgba(245, 158, 11, 0.08);
+  --state-error: #ef4444;
+  --state-error-bg: rgba(239, 68, 68, 0.08);
+  --state-info: #06b6d4;
+  --state-info-bg: rgba(6, 182, 212, 0.08);
+
+  /* Radius */
+  --aic-radius-small: 4px;
+  --aic-radius-medium: 8px;
+  --aic-radius-large: 12px;
+
+  /* Typography */
+  --font-display: 'InstrumentSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-body: 'WorkSans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'DMMono', 'Consolas', monospace;
+
+  /* Layout helpers */
+  --max-content: 1120px;
+  --sidebar-width: 240px;
+}
+
+/* === Light mode (default) === */
+html.light {
+  color-scheme: light;
+}
+
+/* === Dark mode support === */
+html.dark {
+  color-scheme: dark;
+  --aic-background: #11131f;
+  --aic-background-2: rgba(255, 255, 255, 0.05);
+  --aic-surface: #1a1b2e;
+  --aic-surface-elevated: #23253a;
+  --aic-foreground: #f3f4f6;
+  --aic-muted-foreground: #9ca3af;
+  --aic-card: #1a1b2e;
+  --aic-card-foreground: #f3f4f6;
+  --aic-popover: #1a1b2e;
+  --aic-popover-foreground: #f3f4f6;
+  --aic-muted: #23253a;
+  --aic-border: rgba(99, 102, 241, 0.22);
+  --aic-border-solid: #374151;
+  --aic-input: #374151;
+}
