@@ -276,7 +276,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else {
         const [published, own] = await Promise.all([
           apiFetch<{ items: any[]; total: number }>('/works?pageSize=50'),
-          apiFetch<any[]>(`/auth/users/${currentUser.id}/works`),
+          apiFetch<any[]>(`/users/${currentUser.id}/works`),
         ])
         const merged = new Map<string, any>()
         published.items.forEach((item) => merged.set(item.id, item))

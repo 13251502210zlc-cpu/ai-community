@@ -1,8 +1,8 @@
 # AI 社区平台接口文档（当前代码版）
 
-> 文档日期：2026-08-10  
-> 后端包版本：`1.0.0`  
-> 接口基线：当前工作区 `ai-community-server/src` 代码，共 57 个路由  
+> 文档日期：2026-08-11
+> 后端包版本：`1.0.0`
+> 接口基线：当前工作区 `ai-community-server/src` 代码，共 63 个路由（含 2 个兼容路径）
 > 生产测试地址：`https://aicommunity-test.cdf-hn.com`
 
 ## 1. 接入约定
@@ -65,8 +65,8 @@ Authorization: Bearer <token>
 |---|---|---|
 | 普通用户 | `user` | `work:read`, `work:create` |
 | 创作者 | `creator` | `work:read`, `work:create`, `work:submit`, `work:editOwn`, `work:deleteOwn`, `work:offlineOwn` |
-| 审核管理员 | `reviewer` | `work:read`, `review:view`, `review:approve`, `review:reject`, `review:forceOffline` |
-| 运营管理员 | `operator` | `work:read`, `admin:domain`, `admin:tag`, `admin:user`, `admin:recommend`, `admin:stats` |
+| 审核管理员 | `reviewer` | `work:read`, `review:view`, `review:approve`, `review:reject`, `review:forceOffline`, `admin:workRead`, `admin:workManage` |
+| 运营管理员 | `operator` | `work:read`, `admin:domain`, `admin:tag`, `admin:user`, `admin:recommend`, `admin:stats`, `admin:workRead`, `admin:workManage` |
 | 超级管理员 | `super_admin` | 全部权限（额外包含 `admin:role`） |
 
 ## 3. 核心数据结构
@@ -232,26 +232,25 @@ JWT 为无状态 Token，客户端仍需主动清除本地 Token。
 
 ### 5.4 切换角色（现有兼容接口）
 
-`POST /auth/switch-role` 已禁用并返回 403。系统角色只能由超级管理员通过后台用户管理接口分配。
+`POST /auth/switch-role` 已禁用。系统角色只能由超级管理员通过后台用户管理接口分配。
 
 ```json
-{ "roles": ["creator", "reviewer"] }
+{
+  "error": "用户不能自行切换或分配系统角色，请联系超级管理员",
+  "code": "FORBIDDEN"
+}
 ```
 
-兼容旧请求：
-
-```json
-{ "role": "creator" }
-```
-
-返回更新后的用户、`roles`、`roleLabels` 和新签发的 `token`。客户端必须替换旧 Token。
+HTTP 状态为 `403`。请求体中的 `role` 或 `roles` 均不会生效。
 
 ### 5.5 用户作品与收藏
 
 | 方法 | 路径 | 认证 | 响应 |
 |---|---|---|---|
-| GET | `/auth/users/:id/works` | 登录 | 用户未删除的作品数组，含标签和版本 |
-| GET | `/auth/users/:id/favorites` | 登录 | 用户收藏的作品数组 |
+| GET | `/users/:id/works` | 本人；审核、运营或超管可查看其他用户 | 用户未删除的作品数组，含标签和版本 |
+| GET | `/users/:id/favorites` | 仅本人 | 用户收藏的作品数组 |
+
+> 标准完整地址示例：`GET https://aicommunity-test.cdf-hn.com/api/users/{id}/works`。为兼容已上线客户端，`/api/auth/users/{id}/works` 和 `/api/auth/users/{id}/favorites` 仍可使用；新接入请使用 `/api/users/...`。
 
 ## 6. 企业微信登录接口
 
@@ -316,6 +315,7 @@ JWT 为无状态 Token，客户端仍需主动清除本地 Token。
 |---|---|---|---|
 | POST | `/upload/cover` | 图片 MIME，最大 5 MB | `{ url, name, size }` |
 | POST | `/upload/attachment` | 最大 100 MB；拒绝 exe/bat/cmd/sh/js/ts | `{ id, url, name, size, storedName }` |
+| GET | `/upload/attachment/:filename` | 作者/审核/运营/超管，或已发布作品的当前版本附件 | 返回附件文件流；`Content-Disposition: attachment` |
 | DELETE | `/upload/attachment/:filename` | `filename` 使用上传响应的 `storedName` | `{ success: true }` |
 
 上传示例：
@@ -346,14 +346,16 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 
 响应：`PageResult<Work>`，仅返回 `status=published` 的作品。
 
-### 8.2 公开查询
+### 8.2 作品查询
+
+以下接口均需要登录。
 
 | 方法 | 路径 | 响应 |
 |---|---|---|
-| GET | `/works/recommended` | 最近发布的推荐作品，最多 3 条 |
+| GET | `/works/recommended` | 最近发布的推荐作品，最多 5 条 |
 | GET | `/works/domains` | 业务领域名称数组 `string[]` |
 | GET | `/works/tags` | 标签名称数组 `string[]` |
-| GET | `/works/:id` | 作品详情，含版本、附件、评论、标签和互动状态；浏览量 +1 |
+| GET | `/works/:id` | 作品详情，含版本、附件、评论、标签和互动状态；已发布作品浏览量 +1。未发布作品仅作者、审核、运营或超管可见 |
 
 ### 8.3 创建作品
 
@@ -371,23 +373,32 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
   "scene": "内部员工咨询",
   "coreAbilities": ["知识检索", "多轮问答"],
   "coverUrl": "/uploads/covers/xxx.png",
-  "changelog": "初始版本"
+  "changelog": "初始版本",
+  "attachments": [
+    {
+      "name": "使用手册.pdf",
+      "size": "1.20 MB",
+      "url": "/api/upload/attachment/xxx.pdf",
+      "storedName": "xxx.pdf"
+    }
+  ]
 }
 ```
 
 | 字段 | 必填 | 约束 |
 |---|---|---|
-| `title` | 是 | 1～100 字符 |
+| `title` | 是 | 2～50 字符；不能与未删除作品重名 |
 | `type` | 是 | `WorkType` 枚举 |
-| `category` | 是 | 非空 |
-| `tags` | 否 | 字符串数组，默认 `[]` |
-| `intro` | 是 | 非空 |
-| `usage` | 否 | 默认空字符串 |
-| `businessValue` | 否 | 字符串 |
+| `category` | 是 | 必须是后台已存在的业务领域 |
+| `tags` | 是 | 1～5 个非空字符串 |
+| `intro` | 是 | 10～100 字符 |
+| `usage` | 是 | 至少 20 字符 |
+| `businessValue` | 否 | 最多 500 字符 |
 | `scene` | 否 | 字符串 |
 | `coreAbilities` | 否 | 字符串数组 |
 | `coverUrl` | 否 | 字符串 |
 | `changelog` | 否 | 首版更新说明 |
+| `attachments` | 否 | 附件数组；每项需包含上传响应中的 `name/size/url/storedName`。`skill`、`workflow` 类型至少上传 1 个附件 |
 
 成功返回 201 和完整 `Work`。系统自动创建 `v1` 草稿；普通用户首次创建后自动增加 `creator` 角色。
 
@@ -395,9 +406,9 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 
 | 方法 | 路径 | 权限/限制 | 请求体 | 响应 |
 |---|---|---|---|---|
-| PUT | `/works/:id` | `work:editOwn`，仅作者 | 创建字段的任意子集 | 更新后的作品 |
+| PUT | `/works/:id` | 作者需 `work:editOwn`；具有 `admin:workManage` 的审核/运营/超管可管理其他作品 | 创建字段的任意子集；必须存在 `draft` 或 `rejected` 版本 | 更新后的作品 |
 | DELETE | `/works/:id` | `work:deleteOwn`，作者或超管 | 无 | `{ success: true }` |
-| POST | `/works/:id/offline` | `work:offlineOwn`，作者或审核/超管 | 无 | `{ success: true }` |
+| POST | `/works/:id/offline` | 需 `work:offlineOwn`，并且是作者或审核/超管 | 无 | `{ success: true }` |
 | POST | `/works/:id/republish` | 登录，仅作者且作品已下架 | 无 | `{ success: true }` |
 
 删除为软删除：作品状态改为 `deleted`。
@@ -417,25 +428,25 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 
 ### 9.1 版本列表
 
-`GET /works/:workId/versions`，需要登录。仅作品作者、审核管理员或超级管理员可查看。
+`GET /works/:workId/versions`，需要登录。仅作品作者、审核管理员、运营管理员或超级管理员可查看。
 
 返回 `WorkVersion[]`，按创建时间倒序。
 
 ### 9.2 创建版本
 
-`POST /works/:workId/versions`，需要 `work:submit`，仅作者。
+`POST /works/:workId/versions`，作者需要 `work:submit`；具有 `admin:workManage` 的审核、运营或超管也可操作。
 
 ```json
 { "changelog": "新增批量导入能力" }
 ```
 
-服务端自动生成下一个版本号；同一作品存在候选版本时返回 409 `CANDIDATE_EXISTS`。
+`changelog` 至少 10 个字符。服务端自动生成下一个版本号；同一作品已有草稿或待审核版本时返回 400，存在候选版本时返回 409 `CANDIDATE_EXISTS`。
 
 ### 9.3 版本流转
 
 | 方法 | 路径 | 权限 | 前置状态 | 请求体/响应 |
 |---|---|---|---|---|
-| POST | `/works/:workId/versions/:version/submit` | `work:submit`，作者 | `draft` | 返回更新后的版本 |
+| POST | `/works/:workId/versions/:version/submit` | 作者需 `work:submit`；管理员可凭 `admin:workManage` 操作 | `draft` | 返回更新后的版本 |
 | POST | `/works/:workId/versions/:version/withdraw` | `work:submit`，作者 | `pending` | 状态退回 `draft` |
 | POST | `/works/:workId/versions/:version/approve` | `review:approve` | `pending` | 审核结果对象 |
 | POST | `/works/:workId/versions/:version/reject` | `review:reject` | `pending` | `{ "reason": "至少 5 个字符" }` |
@@ -544,18 +555,21 @@ interface ReviewVersion {
 | PUT | `/admin/users/:id/roles` | `admin:role` | `{ "roles": ["creator", "reviewer"] }` | 更新后的用户和 roles |
 | PUT | `/admin/users/:id/role` | `admin:role` | `{ "role": "creator" }` | 旧版单角色兼容接口 |
 | GET | `/admin/permission-matrix` | `admin:role` | 无 | 完整角色权限矩阵 |
-| POST | `/admin/users/:id/reset-password` | `admin:user` | 无 | `{ success: true }` |
+| PUT | `/admin/permission-matrix/:role` | `admin:role` | `{ "permissions": ["work:read"] }` | `{ role, permissions }`；不能修改 `super_admin` |
+| PUT | `/admin/users/:id/account` | `admin:user` | `loginMethod`, `loginAccount`, `password`, `accountStatus` 的任意子集 | 更新后的后台用户对象 |
+| POST | `/admin/users/:id/reset-password` | `admin:user` | 无 | `{ success: true, temporaryPassword }` |
 
 `GET /admin/users` 的 `role=all` 表示全部；`q` 搜索姓名、部门和岗位。
 
 ### 10.5 作品运营管理
 
-| 方法 | 路径 | 权限 | 前置条件 | 响应 |
+| 方法 | 路径 | 权限 | 参数/前置条件 | 响应 |
 |---|---|---|---|---|
+| GET | `/admin/works` | `admin:workRead` | Query: `page`, `pageSize`, `status`, `type`, `q` | `{ items, total, page, pageSize, totalPages }` |
 | POST | `/admin/works/:id/recommend` | `admin:recommend` | 作品存在 | `{ recommended: boolean }` |
-| POST | `/admin/works/:id/offline` | `review:forceOffline` | `published` | `{ success: true, status: "offline" }` |
-| POST | `/admin/works/:id/republish` | `review:forceOffline` | `offline` | `{ success: true, status: "published" }` |
-| DELETE | `/admin/works/:id` | `review:forceOffline` | 尚未删除 | `{ success: true, status: "deleted" }` |
+| POST | `/admin/works/:id/offline` | `admin:workManage` | `published` | `{ success: true, status: "offline" }` |
+| POST | `/admin/works/:id/republish` | `admin:workManage` | `offline` | `{ success: true, status: "published" }` |
+| DELETE | `/admin/works/:id` | `admin:workManage` | 尚未删除 | `{ success: true, status: "deleted" }` |
 
 ## 11. 操作日志接口
 
@@ -636,10 +650,10 @@ curl "https://aicommunity-test.cdf-hn.com/api/admin/review/queue" \
 | 模块 | 数量 |
 |---|---:|
 | 系统状态 | 1 |
-| 登录与用户（含企微） | 9 |
-| 文件上传 | 3 |
+| 登录与用户（含企微及兼容路径） | 11 |
+| 文件上传 | 4 |
 | 作品 | 14 |
 | 版本与审核流转 | 8 |
-| 管理后台 | 19 |
+| 管理后台 | 22 |
 | 操作日志 | 3 |
-| **合计** | **57** |
+| **合计** | **63** |

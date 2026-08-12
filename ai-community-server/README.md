@@ -74,8 +74,8 @@ DATABASE_URL="postgresql://user:password@localhost:5432/ai_community?schema=publ
 |------|------|------|------|
 | GET | `/api/auth/me` | 当前登录用户 | 登录 |
 | POST | `/api/auth/switch-role` | 切换角色（演示用） | 登录 |
-| GET | `/api/users/:id/works` | 用户的作品列表 | 登录 |
-| GET | `/api/users/:id/favorites` | 用户收藏的作品 | 登录 |
+| GET | `/api/users/:id/works` | 用户的作品列表（兼容 `/api/auth/users/:id/works`） | 登录 |
+| GET | `/api/users/:id/favorites` | 用户收藏的作品（兼容 `/api/auth/users/:id/favorites`） | 登录 |
 
 ### 作品
 | 方法 | 路径 | 说明 | 权限 |

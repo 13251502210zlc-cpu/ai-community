@@ -294,6 +294,8 @@ x-user-name: 周涛
 
 ### 3.1 `GET /api/users/:id/works`
 
+兼容路径：`GET /api/auth/users/:id/works`。
+
 获取指定用户的作品列表。**需登录**。仅返回未删除作品。
 
 **响应**：作品数组（含 `tags`、`versions`，按创建时间倒序）。
@@ -301,6 +303,8 @@ x-user-name: 周涛
 ---
 
 ### 3.2 `GET /api/users/:id/favorites`
+
+兼容路径：`GET /api/auth/users/:id/favorites`。
 
 获取指定用户的收藏作品列表。**需登录**。
 

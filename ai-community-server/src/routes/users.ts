@@ -1,10 +1,12 @@
-import { Router } from 'express'
+import { Router, type RequestHandler } from 'express'
 import bcrypt from 'bcryptjs'
 import { prisma } from '../lib/prisma.js'
 import { authRequired } from '../lib/auth.js'
 import { signToken } from '../lib/jwt.js'
 
 const router = Router()
+// 用户内容使用独立路由挂载到 /api/users；/api/auth/users 保留向后兼容。
+export const userContentRouter = Router()
 
 // 密码失败次数上限，超过锁定 15 分钟
 const MAX_FAILED_LOGIN = 5
@@ -209,7 +211,7 @@ router.post('/switch-role', authRequired, async (req, res, next) => {
 })
 
 // GET /api/users/:id/works —— 用户的作品列表
-router.get('/users/:id/works', authRequired, async (req, res, next) => {
+const getUserWorks: RequestHandler = async (req, res, next) => {
   try {
     if (req.params.id !== req.userId && !(req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))) {
       res.status(403).json({ error: '无权查看其他用户的非公开作品', code: 'FORBIDDEN' })
@@ -230,10 +232,10 @@ router.get('/users/:id/works', authRequired, async (req, res, next) => {
   } catch (err) {
     next(err)
   }
-})
+}
 
 // GET /api/users/:id/favorites —— 用户收藏的作品
-router.get('/users/:id/favorites', authRequired, async (req, res, next) => {
+const getUserFavorites: RequestHandler = async (req, res, next) => {
   try {
     if (req.params.id !== req.userId) {
       res.status(403).json({ error: '只能查看自己的收藏', code: 'FORBIDDEN' })
@@ -254,6 +256,14 @@ router.get('/users/:id/favorites', authRequired, async (req, res, next) => {
   } catch (err) {
     next(err)
   }
-})
+}
+
+// 标准接口：/api/users/:id/*
+userContentRouter.get('/:id/works', authRequired, getUserWorks)
+userContentRouter.get('/:id/favorites', authRequired, getUserFavorites)
+
+// 兼容已上线前端及旧调用方：/api/auth/users/:id/*
+router.get('/users/:id/works', authRequired, getUserWorks)
+router.get('/users/:id/favorites', authRequired, getUserFavorites)
 
 export default router

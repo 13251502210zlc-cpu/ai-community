@@ -7,7 +7,7 @@ import { errorHandler } from './lib/error.js'
 import worksRouter from './routes/works.js'
 import versionsRouter from './routes/versions.js'
 import adminRouter from './routes/admin.js'
-import usersRouter from './routes/users.js'
+import usersRouter, { userContentRouter } from './routes/users.js'
 import wecomAuthRouter from './routes/wecom-auth.js'
 import uploadRouter from './routes/upload.js'
 import operationLogsRouter from './routes/operation-logs.js'
@@ -71,8 +71,10 @@ app.get('/api/health', (_req, res) => {
 // 路由挂载
 // v1.4：企业微信 OAuth 路由（/api/auth/wecom/url、/api/auth/wecom/callback、/api/auth/wecom/status）
 app.use('/api/auth', wecomAuthRouter)
-// 账号密码登录、退出、me、switch-role、用户作品/收藏
+// 账号密码登录、退出、me、switch-role，以及旧版用户作品/收藏兼容路由
 app.use('/api/auth', usersRouter)
+// 用户内容标准路由：/api/users/:id/works、/api/users/:id/favorites
+app.use('/api/users', userContentRouter)
 app.use('/api/upload', uploadRouter)
 app.use('/api/works', worksRouter)
 app.use('/api/works', versionsRouter) // /api/works/:workId/versions/*

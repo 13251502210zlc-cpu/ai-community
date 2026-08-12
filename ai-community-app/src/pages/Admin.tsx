@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   ClipboardList, FolderTree, Tag, Users, Package,
   Star, BarChart3, TrendingUp, Plus, Trash2, Pencil,
@@ -1784,6 +1784,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
 
 // ============ 作品管理面板（v1.5：统一的作品列表入口） ============
 function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
+  const navigate = useNavigate()
   const {
     works, addToast,
     offlineWork, onlineWork,
@@ -1888,13 +1889,13 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
     if (count > 0) setSelectedIds((prev) => prev.filter((id) => id !== work.id))
   }
 
-  // 行操作：编辑（生成新版本走审核流程）— 跳转到作品详情页
+  // 行操作：编辑（生成新版本走审核流程）— 直接进入作品编辑页
   const handleEdit = (work: Work) => {
     if (work.status === 'deleted') {
       addToast('error', '已删除作品不可编辑')
       return
     }
-    addToast('info', `跳转到作品详情页发起新版本编辑`)
+    navigate(`/publish?edit=${encodeURIComponent(work.id)}`)
   }
 
   // 批量操作

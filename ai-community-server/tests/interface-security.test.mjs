@@ -120,6 +120,29 @@ test('普通用户不能读取他人的未发布作品', async () => {
   assert.equal(response.status, 404)
 })
 
+test('用户作品和收藏同时支持标准路径与兼容路径', async () => {
+  const headers = { authorization: `Bearer ${token(adminId, ['super_admin'])}` }
+  for (const prefix of ['/api/users', '/api/auth/users']) {
+    const worksResponse = await request(`${prefix}/${adminId}/works`, { headers })
+    assert.equal(worksResponse.status, 200)
+    const works = await worksResponse.json()
+    assert.ok(works.some((work) => work.id === workId))
+
+    const favoritesResponse = await request(`${prefix}/${adminId}/favorites`, { headers })
+    assert.equal(favoritesResponse.status, 200)
+    assert.deepEqual(await favoritesResponse.json(), [])
+  }
+})
+
+test('用户作品和收藏接口必须登录且收藏只能本人查看', async () => {
+  assert.equal((await request(`/api/users/${normalId}/works`)).status, 401)
+  assert.equal((await request(`/api/users/${normalId}/favorites`)).status, 401)
+  const response = await request(`/api/users/${adminId}/favorites`, {
+    headers: { authorization: `Bearer ${token(normalId, ['user'])}` },
+  })
+  assert.equal(response.status, 403)
+})
+
 test('作品内容只有版本审核通过后才切换上线', async () => {
   const auth = { authorization: `Bearer ${token(normalId, ['user'])}`, 'content-type': 'application/json' }
   const adminAuth = { authorization: `Bearer ${token(adminId, ['super_admin'])}`, 'content-type': 'application/json' }
