@@ -23,6 +23,7 @@ export default function Detail() {
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('intro')
   const [comment, setComment] = useState('')
   const [viewCounted, setViewCounted] = useState(false)
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null)
 
   const work = works.find((w) => w.id === id)
 
@@ -60,6 +61,20 @@ export default function Detail() {
     addToast('success', '开始下载附件')
   }
 
+  const handleAttachmentDownload = async (file: typeof work.attachments[number]) => {
+    if (!file.url || downloadingAttachmentId) return
+    setDownloadingAttachmentId(file.id)
+    try {
+      await downloadAttachmentFile(file.url, file.name)
+      await incrementDownload(work.id)
+      addToast('success', `正在下载：${file.name}`)
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '附件下载失败，请重试')
+    } finally {
+      setDownloadingAttachmentId(null)
+    }
+  }
+
   // 主操作：根据作品类型执行实际动作
   const handlePrimaryAction = async () => {
     const action = TYPE_SPEC_CONFIG[work.type].primaryAction.label
@@ -67,9 +82,7 @@ export default function Detail() {
 
     // 有附件 URL → 真正触发文件下载
     if (firstAttachment?.url) {
-      await downloadAttachmentFile(firstAttachment.url, firstAttachment.name)
-      await incrementDownload(work.id)
-      addToast('success', `正在下载：${firstAttachment.name}`)
+      await handleAttachmentDownload(firstAttachment)
       return
     }
 
@@ -354,15 +367,15 @@ export default function Detail() {
                   </div>
                 </div>
                 {file.url ? (
-                  <a
-                    href={assetUrl(file.url)}
-                    download={file.name}
-                    onClick={async () => { await incrementDownload(work.id) }}
+                  <button
+                    type="button"
+                    onClick={() => handleAttachmentDownload(file)}
+                    disabled={downloadingAttachmentId !== null}
                     className="inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs font-medium transition hover:border-primary hover:text-primary"
                     style={{ borderColor: 'var(--aic-border-solid)' }}
                   >
-                    <Download size={12} /> 下载
-                  </a>
+                    <Download size={12} /> {downloadingAttachmentId === file.id ? '下载中...' : '下载'}
+                  </button>
                 ) : (
                   <button
                     onClick={handleDownload}

@@ -1,12 +1,12 @@
 import { useState, useMemo, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ImagePlus, FileUp, X, Save, Send, History, Lock, Loader2 } from 'lucide-react'
+import { ImagePlus, FileUp, X, Save, Send, History, Lock, Loader2, Download } from 'lucide-react'
 import { useApp } from '../store/AppStore'
 import { WORK_TYPES } from '../types'
 import { WorkStatusBadge, VersionStatusBadge } from '../components/Tags'
 import type { WorkType, Work, WorkVersion, VersionStatus } from '../types'
 import { TYPE_SPEC_CONFIG } from '../types'
-import { uploadCover, uploadAttachment, deleteAttachment, assetUrl, createVersionApi } from '../lib/api'
+import { uploadCover, uploadAttachment, deleteAttachment, assetUrl, createVersionApi, downloadAttachmentFile } from '../lib/api'
 
 // v1.3：计算下一个版本号（v1/v2/v3 递增格式）
 function nextVersion(versions: WorkVersion[]): string {
@@ -56,6 +56,7 @@ export default function Publish() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   // v2.0：附件删除中状态（按 storedName 跟踪，避免并发删除时 UI 闪烁）
   const [deletingAttachment, setDeletingAttachment] = useState<string | null>(null)
+  const [downloadingAttachment, setDownloadingAttachment] = useState<string | null>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
   const [customTag, setCustomTag] = useState('')
@@ -80,6 +81,22 @@ export default function Publish() {
     }
     setAttachments(attachments.filter((_, idx) => idx !== index))
     addToast('success', `附件 ${att.name} 已移除`)
+  }
+
+  // 编辑已有作品时，通过鉴权下载接口获取附件，普通直链无法携带 JWT。
+  const handleDownloadAttachment = async (index: number) => {
+    const att = attachments[index]
+    if (!att?.url || downloadingAttachment) return
+    const key = att.storedName || att.id || String(index)
+    setDownloadingAttachment(key)
+    try {
+      await downloadAttachmentFile(att.url, att.name)
+      addToast('success', `正在下载：${att.name}`)
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '附件下载失败，请重试')
+    } finally {
+      setDownloadingAttachment(null)
+    }
   }
 
   // v1.1：当前可编辑版本
@@ -628,17 +645,33 @@ export default function Publish() {
                     <div className="mt-2 space-y-1">
                       {attachments.map((a, i) => {
                         const isDeleting = !!a.storedName && deletingAttachment === a.storedName
+                        const downloadKey = a.storedName || a.id || String(i)
+                        const isDownloading = downloadingAttachment === downloadKey
                         return (
                           <div key={a.id || i} className="flex items-center justify-between rounded-md px-2 py-1.5 text-xs" style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}>
                             <span className="truncate flex-1">{a.name} · {a.size}</span>
-                            <button
-                              onClick={() => handleRemoveAttachment(i)}
-                              disabled={isDeleting}
-                              className="ml-2 flex-shrink-0 hover:opacity-70 disabled:opacity-50"
-                              title={isDeleting ? '删除中...' : '移除附件'}
-                            >
-                              {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
-                            </button>
+                            <div className="ml-2 flex flex-shrink-0 items-center gap-2">
+                              {a.url && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadAttachment(i)}
+                                  disabled={downloadingAttachment !== null}
+                                  className="hover:opacity-70 disabled:opacity-50"
+                                  title={isDownloading ? '下载中...' : '下载附件'}
+                                >
+                                  {isDownloading ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAttachment(i)}
+                                disabled={isDeleting}
+                                className="hover:opacity-70 disabled:opacity-50"
+                                title={isDeleting ? '删除中...' : '移除附件'}
+                              >
+                                {isDeleting ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />}
+                              </button>
+                            </div>
                           </div>
                         )
                       })}

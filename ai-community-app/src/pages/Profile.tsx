@@ -1,6 +1,6 @@
 import { useState, Fragment, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, Edit, Undo, MessageSquareWarning, Clock, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Edit, Undo, MessageSquareWarning, Clock, CheckCircle, XCircle, ArrowUpCircle } from 'lucide-react'
 import { useApp } from '../store/AppStore'
 import { TypeTag, WorkStatusBadge, Avatar } from '../components/Tags'
 import WorkCard from '../components/WorkCard'
@@ -14,7 +14,7 @@ const TABS = [
   { id: 'review', label: '审核进度' },
 ] as const
 
-// v1.1：确定展示用版本（优先级：待审核 > 已驳回 > 草稿 > 当前线上版本）
+// v2.1：确定展示用版本（优先级：待审核 > 已驳回 > 草稿 > 待作者确认的候选版本 > 当前线上版本）
 function pickDisplayVersion(work: Work): WorkVersion | undefined {
   if (!work.versions.length) return undefined
   const pending = work.versions.find((v) => v.status === 'pending')
@@ -23,12 +23,14 @@ function pickDisplayVersion(work: Work): WorkVersion | undefined {
   if (rejected) return rejected
   const draft = work.versions.find((v) => v.status === 'draft')
   if (draft) return draft
+  const candidate = work.versions.find((v) => v.status === 'passed' && v.candidate)
+  if (candidate) return candidate
   const current = work.versions.find((v) => v.current)
   return current || work.versions[0]
 }
 
 export default function Profile() {
-  const { works, events, currentUser, withdrawVersion, startModifyRejected, addToast } = useApp()
+  const { works, events, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast } = useApp()
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('works')
   const [showRejectId, setShowRejectId] = useState<string | null>(null)
 
@@ -58,6 +60,15 @@ export default function Profile() {
       const ok = await startModifyRejected(workId, version)
       if (!ok) addToast('error', '操作失败，请重试')
     }
+  }
+
+  const handlePublishCandidate = async (work: Work, version: WorkVersion) => {
+    if (!window.confirm(`确认上线《${work.title}》的候选版本 ${version.version}？上线后将替换原线上版本并恢复作品展示。`)) return
+    const ok = await publishCandidateVersion(work.id, version.version)
+    addToast(
+      ok ? 'success' : 'error',
+      ok ? `《${work.title}》${version.version} 已确认上线` : '候选版本上线失败，请刷新后重试',
+    )
   }
 
   return (
@@ -143,6 +154,7 @@ export default function Profile() {
                     const hasPending = w.versions.some((v) => v.status === 'pending')
                     const hasRejected = w.versions.some((v) => v.status === 'rejected')
                     const hasDraft = w.versions.some((v) => v.status === 'draft')
+                    const candidateVersion = w.versions.find((v) => v.status === 'passed' && v.candidate)
                     const canEdit = w.status !== 'deleted' && (hasDraft || hasRejected || w.status === 'published' || w.status === 'unpublished' || w.status === 'offline')
                     return (
                       <Fragment key={w.id}>
@@ -187,6 +199,14 @@ export default function Profile() {
                                   {vStatus === 'pending' ? '待审核' : vStatus === 'rejected' ? '已驳回' : '草稿'} {displayVersion.version}
                                 </span>
                               )}
+                              {candidateVersion && w.status === 'offline' && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium w-fit"
+                                  style={{ backgroundColor: 'var(--state-warning-bg)', color: 'var(--state-warning)' }}
+                                >
+                                  待作者确认上线 {candidateVersion.version}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="p-3 text-muted-foreground text-xs whitespace-nowrap">{w.publishedAt || w.createdAt || '—'}</td>
@@ -221,6 +241,17 @@ export default function Profile() {
                                   style={{ borderColor: 'var(--state-danger)', color: 'var(--state-danger)' }}
                                 >
                                   <MessageSquareWarning size={11} /> 查看意见
+                                </button>
+                              )}
+                              {candidateVersion && w.status === 'offline' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePublishCandidate(w, candidateVersion)}
+                                  className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium text-white transition hover:opacity-90"
+                                  style={{ backgroundColor: 'var(--state-success)', borderColor: 'var(--state-success)' }}
+                                  title={`确认上线候选版本 ${candidateVersion.version}`}
+                                >
+                                  <ArrowUpCircle size={11} /> 确认上线 {candidateVersion.version}
                                 </button>
                               )}
                             </div>
