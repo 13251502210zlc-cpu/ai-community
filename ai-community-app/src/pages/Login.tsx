@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Lock, User as UserIcon, Eye, EyeOff, Loader2, RefreshCw, Smartphone, AlertCircle } from 'lucide-react'
 import { useApp } from '../store/AppStore'
@@ -9,6 +9,7 @@ import {
   setToken,
   extractTokenFromHash,
   getCurrentUser,
+  LOGIN_REDIRECT_KEY,
 } from '../lib/api'
 import type { User } from '../types'
 
@@ -79,7 +80,20 @@ export default function Login() {
   const [qrSdkError, setQrSdkError] = useState('')
   // 二维码渲染 key（刷新时递增，强制重新初始化）
   const [qrKey, setQrKey] = useState(0)
+  const [qrExpired, setQrExpired] = useState(false)
   const qrContainerRef = useRef<HTMLDivElement>(null)
+
+  const refreshQrCode = async () => {
+    setQrExpired(false)
+    setQrSdkError('')
+    try {
+      const data = await getWecomStatus()
+      setScanConfig(data.scan)
+      setQrKey((key) => key + 1)
+    } catch (err) {
+      setQrSdkError(err instanceof Error ? err.message : '二维码刷新失败')
+    }
+  }
 
   // 账号密码表单
   const [account, setAccount] = useState('')
@@ -97,7 +111,20 @@ export default function Login() {
   const safeRedirectPath = redirectParam?.startsWith('/') && !redirectParam.startsWith('//')
     ? redirectParam
     : null
-  const fromPath = safeRedirectPath || (location.state as { from?: string })?.from || '/'
+  const storedRedirect = (() => {
+    try {
+      const value = sessionStorage.getItem(LOGIN_REDIRECT_KEY)
+      return value?.startsWith('/') && !value.startsWith('//') ? value : null
+    } catch { return null }
+  })()
+  const fromPath = safeRedirectPath || storedRedirect || (location.state as { from?: string })?.from || '/'
+
+  const completeLogin = useCallback((user: User, remember: boolean, userName: string) => {
+    login(user, remember)
+    try { sessionStorage.removeItem(LOGIN_REDIRECT_KEY) } catch { /* ignore */ }
+    addToast('success', `欢迎回来，${userName}！`)
+    navigate(fromPath, { replace: true })
+  }, [addToast, fromPath, login, navigate])
 
   useEffect(() => {
     // v1.4：检查 URL hash 中是否有 OAuth 回调的 token（真实企业微信登录后带回来）
@@ -116,12 +143,10 @@ export default function Login() {
             loginMethod: user.loginMethod || 'wecom',
             accountStatus: user.accountStatus || 'active',
           }
-          login(fullUser, true)
-          addToast('success', `欢迎回来，${user.name}！`)
-          navigate(fromPath, { replace: true })
+          completeLogin(fullUser, true, user.name)
         })
-        .catch(() => {
-          setErrorMsg('登录失败，请重试')
+        .catch((err: unknown) => {
+          setErrorMsg(err instanceof Error ? err.message : '登录失败，请重试')
         })
       return
     }
@@ -139,7 +164,7 @@ export default function Login() {
         setWecomEnabled(false)
         setScanConfig(null)
       })
-  }, [])
+  }, [completeLogin])
 
   // v1.5：企业微信客户端内自动静默登录（无需扫码）
   // 企微工作台打开应用时，用户已登录企业微信，OAuth snsapi_base 会静默授权直接回调
@@ -183,6 +208,7 @@ export default function Login() {
           agentid: scanConfig.agentId,
           redirect_uri: encodeURIComponent(scanConfig.redirectUri),
           state: scanConfig.state,
+          href: `${window.location.origin}/api/auth/wecom/qr-style.css`,
           lang: 'zh',
         })
         setQrSdkLoading(false)
@@ -191,6 +217,13 @@ export default function Login() {
         setQrSdkLoading(false)
         setQrSdkError(err.message || '二维码加载失败')
       })
+  }, [activeTab, wecomEnabled, scanConfig, isInWeCom, qrKey])
+
+  useEffect(() => {
+    if (activeTab !== 'wecom' || !wecomEnabled || !scanConfig || isInWeCom) return
+    setQrExpired(false)
+    const timer = window.setTimeout(() => setQrExpired(true), 60_000)
+    return () => window.clearTimeout(timer)
   }, [activeTab, wecomEnabled, scanConfig, isInWeCom, qrKey])
 
   // v1.4：账号密码登录（调用真实后端 API）
@@ -222,9 +255,7 @@ export default function Login() {
         loginMethod: 'password',
         accountStatus: 'active',
       }
-      login(fullUser, rememberMe)
-      addToast('success', `欢迎回来，${data.user.name}！`)
-      navigate(fromPath, { replace: true })
+      completeLogin(fullUser, rememberMe, data.user.name)
     } catch (err: any) {
       setErrorMsg(err.message || '登录失败')
     } finally {
@@ -305,9 +336,20 @@ export default function Login() {
           >
             {urlError === 'account_disabled'
               ? '账号已被禁用，请联系管理员'
-              : urlError === 'wecom_failed'
-              ? '企业微信登录失败，请重试或使用账号密码登录'
-              : `登录失败：${urlError}`}
+              : ({
+                  wecom_config: '企业微信登录配置不完整，请联系管理员',
+                  wecom_credential: '企业微信应用凭证无效，请联系管理员检查应用 Secret',
+                  wecom_code: '企业微信授权已失效，请重新扫码或从工作台重新进入',
+                  wecom_non_member: '当前账号不是企业成员，无法登录',
+                  wecom_api: '企业微信接口暂时不可用，请稍后重试',
+                  wecom_failed: '企业微信登录失败，请重试或使用账号密码登录',
+                } as Record<string, string>)[urlError] || `登录失败：${urlError}`}
+          </div>
+        )}
+
+        {new URLSearchParams(location.search).get('expired') === '1' && !urlError && (
+          <div className="mb-4 rounded-md p-2 text-xs text-center" style={{ backgroundColor: 'var(--state-warning-bg)', color: 'var(--state-warning)' }}>
+            登录已过期，请重新登录；成功后将返回原页面
           </div>
         )}
 
@@ -368,10 +410,9 @@ export default function Login() {
                   style={{
                     borderColor: 'var(--aic-border-solid)',
                     backgroundColor: '#fff',
-                    width: '300px',
-                    // wwLogin 1.2.7 固定生成 300×400 iframe，容器必须保留完整高度。
-                    // 旧版 300px 高度配合 overflow-hidden 会裁掉二维码下半部分。
-                    height: '400px',
+                    width: '220px',
+                    height: '260px',
+                    overflow: 'hidden',
                   }}
                 >
                   {qrSdkLoading && (
@@ -384,7 +425,7 @@ export default function Login() {
                       <AlertCircle size={28} className="mb-2" style={{ color: 'var(--state-danger)' }} />
                       <div className="text-xs mb-3" style={{ color: 'var(--aic-muted-foreground)' }}>{qrSdkError}</div>
                       <button
-                        onClick={() => setQrKey((k) => k + 1)}
+                        onClick={refreshQrCode}
                         className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md text-white"
                         style={{ background: 'var(--aic-primary)' }}
                       >
@@ -396,8 +437,17 @@ export default function Login() {
                   <div
                     id="wecom-qr-container"
                     ref={qrContainerRef}
-                    style={{ width: '300px', height: '400px' }}
+                    style={{ width: '220px', height: '260px' }}
                   />
+                  {qrExpired && !qrSdkError && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/95 px-4">
+                      <AlertCircle size={28} className="mb-2" style={{ color: 'var(--state-warning)' }} />
+                      <div className="text-sm font-medium mb-3">二维码已过期，请重新扫码</div>
+                      <button type="button" onClick={refreshQrCode} className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs text-white" style={{ background: 'var(--aic-primary)' }}>
+                        <RefreshCw size={12} /> 重新获取二维码
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <p className="text-sm mb-1" style={{ color: 'var(--aic-muted-foreground)' }}>
@@ -407,7 +457,7 @@ export default function Login() {
                   扫码后在手机端确认即可登录
                 </p>
                 <button
-                  onClick={() => setQrKey((k) => k + 1)}
+                  onClick={refreshQrCode}
                   className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-md border transition hover:bg-muted"
                   style={{ borderColor: 'var(--aic-border-solid)', color: 'var(--aic-muted-foreground)' }}
                 >

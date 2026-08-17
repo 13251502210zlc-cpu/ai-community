@@ -86,8 +86,8 @@ done
 log "安装依赖并初始化数据库"
 # Prisma CLI 位于开发依赖中，完成 Client 生成和数据库升级后再裁剪依赖。
 npm ci
-npx prisma generate
-npx prisma migrate deploy
+npx prisma generate --schema prisma/postgresql/schema.prisma
+npx prisma migrate deploy --schema prisma/postgresql/schema.prisma
 npm prune --omit=dev
 mkdir -p uploads/covers uploads/attachments logs
 

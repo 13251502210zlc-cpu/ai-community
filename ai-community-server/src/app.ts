@@ -13,6 +13,7 @@ import uploadRouter from './routes/upload.js'
 import operationLogsRouter from './routes/operation-logs.js'
 import { isWecomEnabled } from './lib/wecom.js'
 import { auditMutations } from './lib/audit.js'
+import { serveStoredCover } from './lib/file-storage.js'
 
 dotenv.config()
 
@@ -47,12 +48,23 @@ app.use(morgan('dev'))
 app.use('/api', auditMutations)
 
 // 静态文件服务：上传的封面和附件
+// v2.0：挂载到 /api/uploads/covers 下，确保生产环境 Nginx 反向代理 /api/* 时能正确访问
+app.use('/api/uploads/covers', express.static(path.resolve(process.cwd(), 'uploads', 'covers'), {
+  maxAge: '7d',
+  setHeaders: (res, filePath) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+  },
+}))
+// 本地文件不存在时回退到 COS。兼容历史 `/api/uploads/covers/*` 数据，无需批量改库。
+app.get('/api/uploads/covers/:filename', serveStoredCover)
+// 兼容旧 /uploads/covers 路径（数据库中已有的旧 coverUrl）
 app.use('/uploads/covers', express.static(path.resolve(process.cwd(), 'uploads', 'covers'), {
   maxAge: '7d',
   setHeaders: (res, filePath) => {
     res.setHeader('X-Content-Type-Options', 'nosniff')
   },
 }))
+app.get('/uploads/covers/:filename', serveStoredCover)
 
 // 健康检查
 app.get('/api/health', (_req, res) => {

@@ -15,6 +15,8 @@ declare global {
       userName?: string
       // v1.4：登录方式
       loginType?: 'wecom' | 'password' | 'demo'
+      sessionId?: string
+      deviceType?: 'pc' | 'mobile'
     }
   }
 }
@@ -28,6 +30,10 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
   const jwtPayload = extractUserFromAuthHeader(authHeader)
   if (jwtPayload) {
     try {
+      if (process.env.NODE_ENV === 'production' && (!jwtPayload.sessionId || !jwtPayload.deviceType)) {
+        res.status(401).json({ error: '登录凭证已升级，请重新登录', code: 'SESSION_UPGRADE_REQUIRED' })
+        return
+      }
       const user = await prisma.user.findUnique({
         where: { id: jwtPayload.userId },
         include: { assignedRoles: true },
@@ -44,6 +50,13 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
         res.status(403).json({ error: '账号已锁定，请稍后重试', code: 'ACCOUNT_LOCKED' })
         return
       }
+      if (jwtPayload.sessionId && jwtPayload.deviceType) {
+        const activeSessionId = jwtPayload.deviceType === 'mobile' ? user.mobileSessionId : user.pcSessionId
+        if (activeSessionId !== jwtPayload.sessionId) {
+          res.status(401).json({ error: '账号已在另一台设备登录，请重新登录', code: 'SESSION_REPLACED' })
+          return
+        }
+      }
 
       const roles = user.assignedRoles.length > 0
         ? user.assignedRoles.map((item) => item.role as UserRole)
@@ -53,6 +66,8 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
       req.userRole = roles[0]
       req.userName = user.name
       req.loginType = jwtPayload.loginType || 'wecom'
+      req.sessionId = jwtPayload.sessionId
+      req.deviceType = jwtPayload.deviceType
       next()
       return
     } catch (error) {
@@ -92,6 +107,24 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
 }
 
 // 权限校验中间件工厂（v1.7：基于多角色并集）
+export async function getEffectivePermissions(userRoles: UserRole[]): Promise<Permission[]> {
+  const rows = await prisma.rolePermission.findMany({ where: { role: { in: userRoles } } })
+  const configuredRoles = new Set(rows.map((row) => row.role))
+  const effective = new Set<Permission>()
+
+  for (const role of userRoles) {
+    if (configuredRoles.has(role)) {
+      rows
+        .filter((row) => row.role === role && row.allowed)
+        .forEach((row) => effective.add(row.permission as Permission))
+    } else {
+      ROLE_PERMISSIONS[role]?.forEach((permission) => effective.add(permission))
+    }
+  }
+
+  return Array.from(effective)
+}
+
 export function requirePermission(...perms: Permission[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.userRoles || req.userRoles.length === 0) {
@@ -99,17 +132,8 @@ export function requirePermission(...perms: Permission[]) {
       return
     }
     try {
-      const rows = await prisma.rolePermission.findMany({ where: { role: { in: req.userRoles } } })
-      const configuredRoles = new Set(rows.map((row) => row.role))
-      const effective = new Set<Permission>()
-      for (const role of req.userRoles) {
-        if (configuredRoles.has(role)) {
-          rows.filter((row) => row.role === role && row.allowed).forEach((row) => effective.add(row.permission as Permission))
-        } else {
-          ROLE_PERMISSIONS[role]?.forEach((permission) => effective.add(permission))
-        }
-      }
-      if (!perms.some((permission) => effective.has(permission))) {
+      const effective = await getEffectivePermissions(req.userRoles)
+      if (!perms.some((permission) => effective.includes(permission))) {
         res.status(403).json({ error: '权限不足', code: 'FORBIDDEN' })
         return
       }

@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import type { Work, User, ReviewEvent, WorkStatus, VersionStatus, UserRole, Permission, WorkVersion } from '../types'
-import { hasPermission as checkPermission } from '../types'
-import { apiFetch, getToken, logoutApi, adminOfflineWork, adminRepublishWork, adminDeleteWork, getAdminUsers, adminUpdateUserRoles, getPublicDomains, getPublicTags, getReviewEvents, createWork, updateWorkApi, deleteWorkApi, toggleLikeApi, toggleFavoriteApi, incrementDownloadApi, addCommentApi, toggleRecommendApi, submitVersionApi, withdrawVersionApi, approveVersionApi, rejectVersionApi, modifyRejectedVersionApi, publishCandidateVersionApi, getAdminDomains, createDomainApi, updateDomainApi, deleteDomainApi, getAdminTags, createTagApi, deleteTagApi, resetUserPasswordApi, updateUserAccountApi, createOperationLog } from '../lib/api'
+import { getPermissionsByRoles } from '../types'
+import { apiFetch, getToken, logoutApi, adminOfflineWork, adminRepublishWork, adminDeleteWork, getAdminUsers, adminUpdateUserRoles, getPublicDomains, getPublicTags, getReviewEvents, getWorkDetail, createWork, updateWorkApi, deleteWorkApi, toggleLikeApi, toggleFavoriteApi, incrementDownloadApi, addCommentApi, toggleRecommendApi, submitVersionApi, withdrawVersionApi, approveVersionApi, rejectVersionApi, modifyRejectedVersionApi, publishCandidateVersionApi, getAdminDomains, createDomainApi, updateDomainApi, deleteDomainApi, getAdminTags, createTagApi, deleteTagApi, resetUserPasswordApi, updateUserAccountApi, createOperationLog, getMyPermissions } from '../lib/api'
+import { formatDateTime, nowDateTime, nowDate } from '../lib/datetime'
 import type { LogModule, LogAction } from '../data/mockData'
 
 // v1.9：升级所有缓存 key 版本号，使旧版 mock 数据缓存自动失效
@@ -27,6 +28,7 @@ interface AppState {
   worksLoading: boolean
   worksError: string
   reloadWorks: () => void
+  refreshWork: (id: string) => Promise<Work | null>
   // v1.3：业务领域与标签可变状态
   domains: string[]
   fetchDomains: () => Promise<void>
@@ -39,9 +41,9 @@ interface AppState {
   updateWork: (id: string, updates: Partial<Work>) => Promise<boolean>
   deleteWork: (id: string) => Promise<boolean>
   // v1.5：后台作品管理——上架/下架/批量操作
-  offlineWork: (id: string) => Promise<boolean>
+  offlineWork: (id: string, reason: string) => Promise<boolean>
   onlineWork: (id: string) => Promise<boolean>
-  batchOfflineWorks: (ids: string[]) => Promise<number>
+  batchOfflineWorks: (ids: string[], reason: string) => Promise<number>
   batchOnlineWorks: (ids: string[]) => Promise<number>
   batchDeleteWorks: (ids: string[]) => Promise<number>
   // v1.3：业务领域 CRUD（v1.9：改为 async 调用后端 API）
@@ -58,16 +60,17 @@ interface AppState {
   withdrawVersion: (workId: string, version: string) => Promise<boolean>
   startModifyRejected: (workId: string, version: string) => Promise<boolean>
   // 互动数据归属作品级（v1.9：改为 async 调用后端 API）
-  toggleLike: (id: string) => Promise<void>
-  toggleFavorite: (id: string) => Promise<void>
-  incrementDownload: (id: string) => Promise<void>
+  toggleLike: (id: string) => Promise<boolean>
+  toggleFavorite: (id: string) => Promise<boolean>
+  incrementDownload: (id: string) => Promise<boolean>
   incrementView: (id: string) => void
   addComment: (id: string, content: string) => Promise<boolean>
-  toggleRecommend: (id: string) => Promise<void>
+  toggleRecommend: (id: string) => Promise<boolean>
   // v1.7：设置多角色（v1.9：改为 async 调用后端 API）
   setRoles: (roles: UserRole[]) => Promise<void>
   // v1.7：权限判断辅助
   hasPermission: (perm: import('../types').Permission) => boolean
+  refreshPermissions: () => Promise<void>
   hasRole: (role: UserRole) => boolean
   // 辅助方法
   getLatestVersion: (work: Work) => Work['versions'][number] | undefined
@@ -161,13 +164,15 @@ export function transformWork(raw: any): Work {
       coreAbilities = []
     }
   }
-  // versions 转换
+  // versions 转换（v2.0：时间统一格式化为北京时间）
   const versions: WorkVersion[] = (raw.versions || []).map((v: any) => ({
     version: v.version,
     status: v.status,
-    submittedAt: v.submittedAt?.toISOString?.() || v.submittedAt || '',
-    reviewedAt: v.reviewedAt?.toISOString?.() || v.reviewedAt,
+    date: v.submittedAt ? formatDateTime(v.submittedAt) : (v.createdAt ? formatDateTime(v.createdAt) : ''),
+    submittedAt: v.submittedAt ? formatDateTime(v.submittedAt) : '',
+    reviewedAt: v.reviewedAt ? formatDateTime(v.reviewedAt) : undefined,
     reviewer: v.reviewer,
+    rejectReason: v.rejectReason || undefined,
     reviewNote: v.reviewNote,
     changelog: v.changelog || '',
     attachmentId: v.attachmentId,
@@ -177,6 +182,15 @@ export function transformWork(raw: any): Work {
     baseVersionId: v.baseVersionId,
     candidate: v.candidate,
     current: v.current,
+    // v2.0：版本级附件（编辑草稿时使用）
+    attachments: (v.attachments || []).map((a: any) => ({
+      id: a.id,
+      name: a.name,
+      size: a.size,
+      url: a.url,
+      storedName: a.storedName,
+      downloads: a.downloads || 0,
+    })),
   }))
   return {
     id: raw.id,
@@ -204,15 +218,23 @@ export function transformWork(raw: any): Work {
       url: attachment.url || undefined,
       storedName: attachment.storedName || undefined,
     })) : [],
-    comments: [],
+    comments: Array.isArray(raw.comments) ? raw.comments.map((comment: any) => ({
+      id: comment.id,
+      userId: comment.userId,
+      userName: comment.userName,
+      department: comment.department || '',
+      avatarColor: comment.avatarColor || '',
+      content: comment.content,
+      date: formatDateTime(comment.createdAt || comment.date),
+    })) : [],
     likes: raw.likes || 0,
     favorites: raw.favorites || 0,
     downloads: raw.downloads || 0,
     views: raw.views || 0,
     likedByMe: !!raw.likedByMe,
     favoritedByMe: !!raw.favoritedByMe,
-    createdAt: raw.createdAt?.toISOString?.() || raw.createdAt || '',
-    publishedAt: raw.publishedAt?.toISOString?.() || raw.publishedAt || undefined,
+    createdAt: raw.createdAt ? formatDateTime(raw.createdAt) : '',
+    publishedAt: raw.publishedAt ? formatDateTime(raw.publishedAt) : undefined,
     recommended: !!raw.recommended,
   }
 }
@@ -249,6 +271,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     return false  // v1.7：默认未登录
   })
+  const [effectivePermissions, setEffectivePermissions] = useState<Permission[]>(() =>
+    getPermissionsByRoles(currentUser.roles || [])
+  )
   const [toasts, setToasts] = useState<Toast[]>([])
   const [users, setUsers] = useState<User[]>(() => loadFromStorage(USERS_KEY, []))
   const [usersLoading, setUsersLoading] = useState(false)
@@ -270,7 +295,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setWorks([])
         return
       }
-      if (currentUser.roles.some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))) {
+      if (effectivePermissions.includes('admin:workRead')) {
         const data = await apiFetch<{ items: any[]; total: number }>('/admin/works?pageSize=100')
         setWorks(data.items.map(transformWork))
       } else {
@@ -289,9 +314,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       setWorksLoading(false)
     }
-  }, [currentUser.id, currentUser.roles, isAuthenticated])
+  }, [currentUser.id, effectivePermissions, isAuthenticated])
 
   useEffect(() => { fetchWorks() }, [fetchWorks])
+
+  const refreshWork = useCallback(async (id: string): Promise<Work | null> => {
+    try {
+      const refreshed = transformWork(await getWorkDetail(id))
+      setWorks((prev) => {
+        const exists = prev.some((work) => work.id === id)
+        return exists ? prev.map((work) => work.id === id ? refreshed : work) : [refreshed, ...prev]
+      })
+      return refreshed
+    } catch {
+      return null
+    }
+  }, [])
 
   // v1.9：从后端 API 拉取用户列表（含多角色信息），替代 localStorage 缓存
   const fetchUsers = useCallback(async () => {
@@ -313,8 +351,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loginAccount: u.loginAccount,
         password: u.password,
         failedLoginCount: u.failedLoginCount,
-        lockedUntil: u.lockedUntil?.toISOString?.() || u.lockedUntil,
-        lastLoginAt: u.lastLoginAt?.toISOString?.() || u.lastLoginAt,
+        lockedUntil: u.lockedUntil ? formatDateTime(u.lockedUntil) : undefined,
+        lastLoginAt: u.lastLoginAt ? formatDateTime(u.lastLoginAt) : undefined,
         worksCount: u._count?.worksAuthored ?? 0,
       }))
       setUsers(mapped)
@@ -355,7 +393,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         workTitle: e.workTitle,
         version: e.version,
         status: e.status,
-        date: e.createdAt,
+        date: e.createdAt ? formatDateTime(e.createdAt) : '',
         reviewer: e.reviewer?.name,
         reason: e.reason,
         isFirstVersion: e.isFirstVersion,
@@ -449,7 +487,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateWork = useCallback(async (id: string, updates: Partial<Work>): Promise<boolean> => {
     const w = worksRef.current.find((x) => x.id === id)
     try {
-      await updateWorkApi(id, {
+      const raw = await updateWorkApi(id, {
         ...(updates.title && { title: updates.title }),
         ...(updates.type && { type: updates.type }),
         ...(updates.intro && { intro: updates.intro }),
@@ -469,14 +507,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         })) }),
         ...(updates.versions?.[0]?.changelog && { changelog: updates.versions[0].changelog }),
       })
-      setWorks((prev) => prev.map((wk) => (wk.id === id ? { ...wk, ...updates } : wk)))
+      // 服务端返回的是作品线上主记录 + 独立草稿版本。不能把 updates 直接合并到
+      // Work 根对象，否则已发布作品的草稿会立即污染大厅和详情展示。
+      const refreshed = transformWork(raw)
+      setWorks((prev) => prev.map((wk) => (wk.id === id ? refreshed : wk)))
       if (w) addOperationLog({ module: '作品发布', action: '更新', content: '编辑作品信息', target: w.title })
       return true
     } catch (err: any) {
       if (w) addOperationLog({ module: '作品发布', action: '更新', content: '编辑作品信息', target: w.title, result: 'failed' })
+      addToast('error', err instanceof Error ? err.message : '作品保存失败')
       return false
     }
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.9：删除作品——调用后端 DELETE /api/works/:id
   const deleteWork = useCallback(async (id: string): Promise<boolean> => {
@@ -488,17 +530,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true
     } catch (err: any) {
       if (w) addOperationLog({ module: '个人中心', action: '删除', content: '删除作品', target: w.title, result: 'failed' })
+      addToast('error', err instanceof Error ? err.message : '作品删除失败')
       return false
     }
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.5：后台作品管理——下架（已发布 → 已下架，数据保留）
   // v1.8：调用后端 /api/admin/works/:id/offline，成功后更新本地 state
-  const offlineWork = useCallback(async (id: string): Promise<boolean> => {
+  const offlineWork = useCallback(async (id: string, reason: string): Promise<boolean> => {
     const w = worksRef.current.find((x) => x.id === id)
     if (!w) return false
     try {
-      await adminOfflineWork(id)
+      await adminOfflineWork(id, reason)
       setWorks((prev) => prev.map((work) =>
         work.id === id && work.status === 'published' ? { ...work, status: 'offline' as WorkStatus } : work
       ))
@@ -506,9 +549,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true
     } catch (err: any) {
       addOperationLog({ module: '后台管理', action: '上架/下架', content: '下架作品', target: w.title, result: 'failed' })
+      addToast('error', err instanceof Error ? err.message : '作品下架失败')
       return false
     }
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.5：上架（已下架 → 已发布，重新在大厅展示）
   // v1.8：调用后端 /api/admin/works/:id/republish，成功后更新本地 state
@@ -524,16 +568,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true
     } catch (err: any) {
       addOperationLog({ module: '后台管理', action: '上架/下架', content: '上架作品', target: w.title, result: 'failed' })
+      addToast('error', err instanceof Error ? err.message : '作品上架失败')
       return false
     }
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.5：批量下架
   // v1.8：并发调用后端 API，返回实际成功数
-  const batchOfflineWorks = useCallback(async (ids: string[]): Promise<number> => {
+  const batchOfflineWorks = useCallback(async (ids: string[], reason: string): Promise<number> => {
     const targets = worksRef.current.filter((w) => ids.includes(w.id) && w.status === 'published')
     if (targets.length === 0) return 0
-    const results = await Promise.allSettled(targets.map((w) => adminOfflineWork(w.id)))
+    const results = await Promise.allSettled(targets.map((w) => adminOfflineWork(w.id, reason)))
     const successIds: string[] = []
     const successTitles: string[] = []
     results.forEach((r, i) => {
@@ -548,8 +593,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ))
       addOperationLog({ module: '后台管理', action: '上架/下架', content: `批量下架作品（${successIds.length} 个）`, target: successTitles.slice(0, 3).join('、') + (successTitles.length > 3 ? ' 等' : '') })
     }
+    const failures = results.filter((result) => result.status === 'rejected') as PromiseRejectedResult[]
+    if (failures.length > 0) {
+      const reason = failures[0].reason instanceof Error ? failures[0].reason.message : '请求失败'
+      addToast(successIds.length > 0 ? 'info' : 'error', `批量下架：成功 ${successIds.length} 个，失败 ${failures.length} 个。${reason}`)
+    }
     return successIds.length
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.5：批量上架
   // v1.8：并发调用后端 API，返回实际成功数
@@ -571,8 +621,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ))
       addOperationLog({ module: '后台管理', action: '上架/下架', content: `批量上架作品（${successIds.length} 个）`, target: successTitles.slice(0, 3).join('、') + (successTitles.length > 3 ? ' 等' : '') })
     }
+    const failures = results.filter((result) => result.status === 'rejected') as PromiseRejectedResult[]
+    if (failures.length > 0) {
+      const reason = failures[0].reason instanceof Error ? failures[0].reason.message : '请求失败'
+      addToast(successIds.length > 0 ? 'info' : 'error', `批量上架：成功 ${successIds.length} 个，失败 ${failures.length} 个。${reason}`)
+    }
     return successIds.length
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.5：批量软删除（已删除作品不可再操作）
   // v1.8：并发调用后端 API，返回实际成功数
@@ -594,8 +649,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ))
       addOperationLog({ module: '后台管理', action: '删除', content: `批量删除作品（${successIds.length} 个，软删除）`, target: successTitles.slice(0, 3).join('、') + (successTitles.length > 3 ? ' 等' : '') })
     }
+    const failures = results.filter((result) => result.status === 'rejected') as PromiseRejectedResult[]
+    if (failures.length > 0) {
+      const reason = failures[0].reason instanceof Error ? failures[0].reason.message : '请求失败'
+      addToast(successIds.length > 0 ? 'info' : 'error', `批量删除：成功 ${successIds.length} 个，失败 ${failures.length} 个。${reason}`)
+    }
     return successIds.length
-  }, [addOperationLog])
+  }, [addOperationLog, addToast])
 
   // v1.1：获取最新版本（按日期/版本号排序的第一个）
   const getLatestVersion = useCallback((work: Work) => {
@@ -615,7 +675,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const work = worksRef.current.find((w) => w.id === workId)
     try {
       await submitVersionApi(workId, version)
-      const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const now = nowDateTime()
       setWorks((prev) => prev.map((w) => {
         if (w.id !== workId) return w
         return {
@@ -631,16 +691,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '提交审核失败')
       return false
     }
-  }, [addOperationLog, fetchEvents])
+  }, [addOperationLog, addToast, fetchEvents])
 
   // v1.9：审核通过——调用后端 POST /api/works/:id/versions/:v/approve（三重校验由后端处理）
   const approveVersion = useCallback(async (workId: string, version: string): Promise<boolean> => {
     const work = worksRef.current.find((w) => w.id === workId)
     try {
       const result = await approveVersionApi(workId, version)
-      const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const now = nowDateTime()
       // 根据后端返回的 type 更新本地 state
       setWorks((prev) => prev.map((w) => {
         if (w.id !== workId) return w
@@ -670,16 +731,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (work) addOperationLog({ module: '审核管理', action: '审核', content: `通过版本审核（${result.message}）`, target: `${work.title} ${version}` })
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '审核通过失败')
       return false
     }
-  }, [addOperationLog, fetchEvents])
+  }, [addOperationLog, addToast, fetchEvents])
 
   // v1.9：驳回版本——调用后端 POST /api/works/:id/versions/:v/reject
   const rejectVersion = useCallback(async (workId: string, version: string, reason: string): Promise<boolean> => {
     const work = worksRef.current.find((w) => w.id === workId)
     try {
       await rejectVersionApi(workId, version, reason)
-      const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const now = nowDateTime()
       setWorks((prev) => prev.map((w) => {
         if (w.id !== workId) return w
         return {
@@ -693,9 +755,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (work) addOperationLog({ module: '审核管理', action: '审核', content: '驳回版本（附修改意见）', target: `${work.title} ${version}` })
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '审核驳回失败')
       return false
     }
-  }, [addOperationLog, fetchEvents])
+  }, [addOperationLog, addToast, fetchEvents])
 
   // v1.9：撤回版本——调用后端 POST /api/works/:id/versions/:v/withdraw
   const withdrawVersion = useCallback(async (workId: string, version: string): Promise<boolean> => {
@@ -712,9 +775,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }))
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '撤回版本失败')
       return false
     }
-  }, [])
+  }, [addToast])
 
   // v1.9：修改已驳回版本——调用后端 POST /api/works/:id/versions/:v/modify
   const startModifyRejected = useCallback(async (workId: string, version: string): Promise<boolean> => {
@@ -731,31 +795,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }))
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '修改版本失败')
       return false
     }
-  }, [])
+  }, [addToast])
 
   // v1.9：互动数据——调用后端 API
-  const toggleLike = useCallback(async (id: string): Promise<void> => {
+  const toggleLike = useCallback(async (id: string): Promise<boolean> => {
     try {
       const { liked } = await toggleLikeApi(id)
       setWorks((prev) => prev.map((w) => w.id === id ? { ...w, likedByMe: liked, likes: w.likes + (liked ? 1 : -1) } : w))
-    } catch { /* ignore */ }
-  }, [])
+      return true
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '点赞操作失败')
+      return false
+    }
+  }, [addToast])
 
-  const toggleFavorite = useCallback(async (id: string): Promise<void> => {
+  const toggleFavorite = useCallback(async (id: string): Promise<boolean> => {
     try {
       const { favorited } = await toggleFavoriteApi(id)
       setWorks((prev) => prev.map((w) => w.id === id ? { ...w, favoritedByMe: favorited, favorites: w.favorites + (favorited ? 1 : -1) } : w))
-    } catch { /* ignore */ }
-  }, [])
+      return true
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '收藏操作失败')
+      return false
+    }
+  }, [addToast])
 
-  const incrementDownload = useCallback(async (id: string): Promise<void> => {
+  const incrementDownload = useCallback(async (id: string): Promise<boolean> => {
     try {
       const { downloads } = await incrementDownloadApi(id)
       setWorks((prev) => prev.map((w) => w.id === id ? { ...w, downloads } : w))
-    } catch { /* ignore */ }
-  }, [])
+      return true
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '下载记录更新失败')
+      return false
+    }
+  }, [addToast])
 
   // 浏览量由后端 GET /api/works/:id 自动 +1，前端无需额外调用
   const incrementView = useCallback((_id: string) => { /* no-op: backend handles view count */ }, [])
@@ -772,21 +849,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           department: comment.department || '',
           avatarColor: comment.avatarColor || '',
           content: comment.content,
-          date: comment.createdAt?.toISOString?.() || comment.createdAt || new Date().toISOString().slice(0, 10),
+          date: comment.createdAt ? formatDateTime(comment.createdAt) : nowDate(),
         }, ...w.comments] }
       }))
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '评价发表失败')
       return false
     }
-  }, [])
+  }, [addToast])
 
-  const toggleRecommend = useCallback(async (id: string): Promise<void> => {
+  const toggleRecommend = useCallback(async (id: string): Promise<boolean> => {
     try {
       const { recommended } = await toggleRecommendApi(id)
       setWorks((prev) => prev.map((w) => w.id === id ? { ...w, recommended } : w))
-    } catch { /* ignore */ }
-  }, [])
+      return true
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '推荐操作失败')
+      return false
+    }
+  }, [addToast])
 
   // v1.3：单候选版本限制——检查作品是否已有活动候选版本（草稿或待审核）
   const hasActiveCandidate = useCallback((work: Work) => {
@@ -814,7 +896,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const publishCandidateVersion = useCallback(async (workId: string, version: string): Promise<boolean> => {
     try {
       await publishCandidateVersionApi(workId, version)
-      const today = new Date().toISOString().slice(0, 10)
+      const today = nowDate()
       setWorks((prev) => prev.map((w) => {
         if (w.id !== workId) return w
         return {
@@ -831,9 +913,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }))
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '候选版本上线失败')
       return false
     }
-  }, [])
+  }, [addToast])
 
   // 角色由超级管理员分配，当前用户不能自行切换。
   const setRoles = useCallback(async (roles: UserRole[]): Promise<void> => {
@@ -841,10 +924,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addToast('error', '系统角色只能由超级管理员分配')
   }, [addToast])
 
-  // v1.7：权限判断辅助（基于当前用户多角色并集）
+  const refreshPermissions = useCallback(async () => {
+    if (!isAuthenticated || !currentUser.id || !getToken()) {
+      setEffectivePermissions([])
+      return
+    }
+    try {
+      setEffectivePermissions(await getMyPermissions())
+    } catch {
+      // 网络短暂异常时保留上一份权限；服务端始终是最终鉴权边界。
+    }
+  }, [currentUser.id, isAuthenticated])
+
+  useEffect(() => {
+    void refreshPermissions()
+  }, [refreshPermissions])
+
+  // 权限判断使用服务端返回的实际生效权限
   const hasPermission = useCallback((perm: Permission) => {
-    return checkPermission(currentUser.roles, perm)
-  }, [currentUser.roles])
+    return effectivePermissions.includes(perm)
+  }, [effectivePermissions])
 
   const hasRole = useCallback((role: UserRole) => {
     return currentUser.roles.includes(role)
@@ -880,6 +979,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     logoutApi().catch(() => {})
     setIsAuthenticated(false)
     setCurrentUser(EMPTY_USER)
+    setEffectivePermissions([])
     localStorage.removeItem(AUTH_KEY)
     sessionStorage.removeItem(AUTH_KEY)
     localStorage.removeItem('aic_current_user')
@@ -896,12 +996,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // 角色与账号配置均由后端持久化
     if (updates.roles && target) {
-      try {
-        await adminUpdateUserRoles(userId, updates.roles)
-      } catch {
-        // 后端 API 调用失败时，不更新前端 state，保持数据一致
-        throw new Error('角色分配失败，请检查权限')
-      }
+      await adminUpdateUserRoles(userId, updates.roles)
     }
 
     const accountChanges = {
@@ -947,9 +1042,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (target) addOperationLog({ module: '后台管理', action: '更新', content: '重置用户密码为默认密码', target: `${target.name} (${target.employeeId || target.id})` })
       return result.temporaryPassword
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '重置密码失败')
       return null
     }
-  }, [addOperationLog, users])
+  }, [addOperationLog, addToast, users])
 
   // v1.9：业务领域 CRUD——调用后端 API
   const addDomain = useCallback(async (name: string): Promise<boolean> => {
@@ -960,9 +1056,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await fetchDomains()
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '新增业务领域失败')
       return false
     }
-  }, [fetchDomains])
+  }, [addToast, fetchDomains])
 
   const renameDomain = useCallback(async (oldName: string, newName: string): Promise<void> => {
     const trimmed = newName.trim()
@@ -971,15 +1068,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // 查找业务领域的 id
       const adminDomains = await getAdminDomains()
       const domain = adminDomains.find((d: any) => d.name === oldName)
-      if (!domain) return
+      if (!domain) throw new Error('目标业务领域不存在，请刷新后重试')
       await updateDomainApi(domain.id, trimmed)
       await fetchDomains()
       // 同步更新作品中的 category 字段
       setWorks((prev) => prev.map((w) => (w.category === oldName ? { ...w, category: trimmed } : w)))
     } catch (err: any) {
-      // 重命名失败
+      addToast('error', err instanceof Error ? err.message : '业务领域重命名失败')
+      throw err
     }
-  }, [fetchDomains])
+  }, [addToast, fetchDomains])
 
   const deleteDomain = useCallback(async (name: string): Promise<boolean> => {
     // 有作品关联时禁止删除
@@ -988,14 +1086,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const adminDomains = await getAdminDomains()
       const domain = adminDomains.find((d: any) => d.name === name)
-      if (!domain) return false
+      if (!domain) throw new Error('目标业务领域不存在，请刷新后重试')
       await deleteDomainApi(domain.id)
       await fetchDomains()
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '业务领域删除失败')
       return false
     }
-  }, [fetchDomains])
+  }, [addToast, fetchDomains])
 
   // v1.9：标签 CRUD——调用后端 API
   const addTag = useCallback(async (name: string): Promise<boolean> => {
@@ -1006,28 +1105,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await fetchTags()
       return true
     } catch (err: any) {
+      addToast('error', err instanceof Error ? err.message : '新增标签失败')
       return false
     }
-  }, [fetchTags])
+  }, [addToast, fetchTags])
 
   const deleteTag = useCallback(async (name: string): Promise<void> => {
     try {
       const adminTags = await getAdminTags()
       const tag = adminTags.find((t: any) => t.name === name)
-      if (!tag) return
+      if (!tag) throw new Error('目标标签不存在，请刷新后重试')
       await deleteTagApi(tag.id)
       await fetchTags()
       // 同步从作品的 tags 数组中移除
       setWorks((prev) => prev.map((w) => ({ ...w, tags: w.tags.filter((t) => t !== name) })))
     } catch (err: any) {
-      // 删除失败
+      addToast('error', err instanceof Error ? err.message : '标签删除失败')
+      throw err
     }
-  }, [fetchTags])
+  }, [addToast, fetchTags])
 
   return (
     <AppContext.Provider value={{
       works, events, fetchEvents, currentUser, toasts,
-      worksLoading, worksError, reloadWorks: fetchWorks,
+      worksLoading, worksError, reloadWorks: fetchWorks, refreshWork,
       domains, fetchDomains, tags, fetchTags,
       addToast, removeToast,
       addWork, updateWork, deleteWork,
@@ -1037,7 +1138,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addTag, deleteTag,
       submitVersionForReview, approveVersion, rejectVersion, withdrawVersion, startModifyRejected,
       toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, toggleRecommend,
-      setRoles, hasPermission, hasRole,
+      setRoles, hasPermission, refreshPermissions, hasRole,
       getLatestVersion, getPendingVersion,
       hasActiveCandidate, canCreateNewVersion, publishCandidateVersion,
       // v1.4：登录认证

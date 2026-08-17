@@ -12,10 +12,10 @@
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
-          "contentHeight": 1017,
+          "contentHeight": 1016,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-4a8c806a",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-035f0250",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {
@@ -84,15 +84,15 @@
       "version": 1,
       "createdAt": 1754192100000,
       "canvasData": {
-        "x": 0,
+        "x": 620,
         "y": 0,
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
-          "contentHeight": 1491,
+          "contentHeight": 1490,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-322fb831",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-eff84a1d",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {
@@ -132,15 +132,15 @@
       "version": 1,
       "createdAt": 1754192100000,
       "canvasData": {
-        "x": 0,
-        "y": 0,
+        "x": 620,
+        "y": 971,
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
           "contentHeight": 1090,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-e93f5d4c",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-593a3473",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {
@@ -186,15 +186,15 @@
       "version": 1,
       "createdAt": 1754192100000,
       "canvasData": {
-        "x": 0,
-        "y": 0,
+        "x": 620,
+        "y": 549,
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
           "contentHeight": 1057,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-17a6e61b",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-530e4965",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {
@@ -241,14 +241,14 @@
       "createdAt": 1754192100000,
       "canvasData": {
         "x": 0,
-        "y": 0,
+        "y": 411,
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
-          "contentHeight": 901,
+          "contentHeight": 900,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-65daa5f9",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-022e6c30",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {
@@ -343,14 +343,14 @@
       "createdAt": 1754192100000,
       "canvasData": {
         "x": 0,
-        "y": 0,
+        "y": 971,
         "group": 0,
         "layoutSnapshot": {
           "version": 1,
           "contentHeight": 1042,
           "viewportWidth": 1440,
-          "sourceHash": "fnv1a-73e0399c",
-          "measuredAt": 1785733559000
+          "sourceHash": "fnv1a-a1ce5464",
+          "measuredAt": 1786614332389
         }
       },
       "devMetadata": {

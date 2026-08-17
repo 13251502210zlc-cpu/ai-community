@@ -154,6 +154,13 @@ body::before {
 .cover-workflow { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
 .cover-case { background: linear-gradient(135deg, #f97316, #eab308); }
 
+/* 企微 SDK iframe 收敛到登录卡片尺寸；内部样式由后端 qr-style.css 控制为 180×180。 */
+#wecom-qr-container iframe {
+  width: 220px !important;
+  height: 260px !important;
+  border: 0 !important;
+}
+
 /* === Scrollbar === */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }

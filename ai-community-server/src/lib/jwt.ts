@@ -17,6 +17,12 @@ export interface JwtPayload {
   name: string
   // 登录方式：wecom | password
   loginType?: 'wecom' | 'password'
+  sessionId?: string
+  deviceType?: 'pc' | 'mobile'
+}
+
+export function detectDeviceType(userAgent = ''): 'pc' | 'mobile' {
+  return /Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(userAgent) ? 'mobile' : 'pc'
 }
 
 // 签发 JWT

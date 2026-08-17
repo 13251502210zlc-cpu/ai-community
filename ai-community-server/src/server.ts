@@ -2,6 +2,9 @@
 import dotenv from 'dotenv'
 dotenv.config()
 
+// v2.0：强制设置进程时区为北京时间（UTC+8），确保 new Date()、setHours()、Prisma 日期查询均按北京时间计算
+process.env.TZ = 'Asia/Shanghai'
+
 import app from './app.js'
 import { archiveExpiredOperationLogs } from './lib/audit.js'
 import { migrateLegacySecurityData } from './lib/startup.js'

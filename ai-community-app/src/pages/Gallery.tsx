@@ -8,10 +8,10 @@ import type { WorkType, SortBy, Work } from '../types'
 import WorkCard from '../components/WorkCard'
 import { EmptyState, Pagination } from '../components/Common'
 
-const PAGE_SIZE = 9
+const PAGE_SIZE = 12
 
 export default function Gallery() {
-  const { domains, tags } = useApp()
+  const { domains, tags, works: sharedWorks } = useApp()
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeType, setActiveType] = useState<WorkType | 'all'>('all')
@@ -82,6 +82,18 @@ export default function Gallery() {
       .then((data) => setRecommended(data.map(transformWork)))
       .catch(() => { /* 推荐加载失败不影响主流程 */ })
   }, [showRecommended])
+
+  // 详情页互动会更新全局作品；同步大厅局部列表，返回时立即保持状态和计数。
+  useEffect(() => {
+    const syncInteraction = (work: Work): Work => {
+      const shared = sharedWorks.find((item) => item.id === work.id)
+      return shared
+        ? { ...work, likes: shared.likes, favorites: shared.favorites, likedByMe: shared.likedByMe, favoritedByMe: shared.favoritedByMe }
+        : work
+    }
+    setWorks((current) => current.map(syncInteraction))
+    setRecommended((current) => current.map(syncInteraction))
+  }, [sharedWorks])
 
   // v1.3：切换作品类型不清空业务领域和标签
   const handleTypeChange = (type: WorkType | 'all') => {

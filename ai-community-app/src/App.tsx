@@ -15,9 +15,21 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useApp()
   const location = useLocation()
   if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />
+    return <Navigate to="/login" state={{ from: `${location.pathname}${location.search}` }} replace />
   }
   return <>{children}</>
+}
+
+const ADMIN_ENTRY_PERMISSIONS = [
+  'review:view', 'admin:workRead', 'admin:domain', 'admin:tag', 'admin:user',
+  'admin:recommend', 'admin:stats', 'admin:role',
+] as const
+
+// 后台不能只依赖导航菜单隐藏；直接输入 /admin 时也必须执行权限拦截。
+function AdminRoute({ children }: { children: ReactNode }) {
+  const { hasPermission } = useApp()
+  const canEnterAdmin = ADMIN_ENTRY_PERMISSIONS.some((permission) => hasPermission(permission))
+  return canEnterAdmin ? <>{children}</> : <Navigate to="/" replace />
 }
 
 function AppRoutes() {
@@ -41,7 +53,7 @@ function AppRoutes() {
                 <Route path="/publish" element={<Publish />} />
                 <Route path="/works/:id" element={<Detail />} />
                 <Route path="/profile" element={<Profile />} />
-                <Route path="/admin" element={<Admin />} />
+                <Route path="/admin" element={<AdminRoute><Admin /></AdminRoute>} />
                 <Route path="*" element={<Gallery />} />
               </Routes>
             </Layout>

@@ -31,7 +31,9 @@ server {
     }
 
     # 后端 API 反向代理
-    location /api/ {
+    # ^~ prevents the image/font regex below from intercepting API URLs such as
+    # /api/uploads/covers/example.jpg and returning a false static-file 404.
+    location ^~ /api/ {
         proxy_pass http://127.0.0.1:3001;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -43,7 +45,7 @@ server {
     }
 
     # 上传文件静态访问
-    location /uploads/ {
+    location ^~ /uploads/ {
         alias /opt/ai-community/apps/api/uploads/;
         expires 7d;
     }

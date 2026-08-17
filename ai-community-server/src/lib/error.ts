@@ -47,7 +47,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
 
   if (err.message.startsWith('BUSINESS_')) {
     // 业务错误：以 BUSINESS_ 前缀标识
-    res.status(400).json({ error: err.message, code: 'BUSINESS_ERROR' } satisfies ApiError)
+    res.status(400).json({ error: err.message.slice('BUSINESS_'.length), code: 'BUSINESS_ERROR' } satisfies ApiError)
     return
   }
 

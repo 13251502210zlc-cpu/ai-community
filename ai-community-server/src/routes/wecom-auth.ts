@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { prisma } from '../lib/prisma.js'
-import { signToken } from '../lib/jwt.js'
+import { detectDeviceType, signToken } from '../lib/jwt.js'
 import crypto from 'crypto'
 import {
   getAuthorizeUrl,
@@ -13,6 +13,16 @@ import {
 
 const router = Router()
 const oauthStates = new Map<string, { redirect: string; expiresAt: number }>()
+
+// 企微登录 iframe 自定义样式：只保留标准 180×180 二维码和状态文字，移除 SDK 品牌标题。
+router.get('/wecom/qr-style.css', (_req, res) => {
+  res.type('text/css').send(`
+    .impowerBox .title, .impowerBox .wrp_code_top { display: none !important; }
+    .impowerBox .qrcode { width: 180px !important; height: 180px !important; margin-top: 10px !important; }
+    .impowerBox .info { width: 180px !important; margin: 0 auto !important; }
+    .impowerBox .status { text-align: center !important; }
+  `)
+})
 
 function createOAuthState(redirect = '/') {
   const safeRedirect = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/'
@@ -151,6 +161,12 @@ router.get('/wecom/callback', async (req, res, next) => {
       include: { assignedRoles: true },
     })
     const roles = userWithRoles?.assignedRoles?.map((r) => r.role) || [user.role]
+    const deviceType = detectDeviceType(req.get('user-agent') || '')
+    const sessionId = crypto.randomUUID()
+    await prisma.user.update({
+      where: { id: user.id },
+      data: deviceType === 'mobile' ? { mobileSessionId: sessionId } : { pcSessionId: sessionId },
+    })
     await prisma.operationLog.create({
       data: {
         time: new Date(),
@@ -171,6 +187,8 @@ router.get('/wecom/callback', async (req, res, next) => {
       roles,
       name: user.name,
       loginType: 'wecom',
+      sessionId,
+      deviceType,
     })
 
     // 统一由 /login 消费 token；redirect 仅允许站内绝对路径，避免开放重定向。
@@ -185,7 +203,19 @@ router.get('/wecom/callback', async (req, res, next) => {
   } catch (err) {
     console.error('[wecom callback] error:', err)
     const frontendUrl = process.env.FRONTEND_ORIGIN || '/'
-    res.redirect(`${frontendUrl}/login?error=wecom_failed`)
+    const message = err instanceof Error ? err.message : ''
+    const errorCode = message.includes('配置缺失')
+      ? 'wecom_config'
+      : message.includes('access_token')
+        ? 'wecom_credential'
+        : message.includes('userid') && message.includes('失败')
+          ? 'wecom_code'
+          : message.includes('非企业成员')
+            ? 'wecom_non_member'
+            : message.includes('企业微信')
+              ? 'wecom_api'
+              : 'wecom_failed'
+    res.redirect(`${frontendUrl}/login?error=${errorCode}`)
   }
 })
 

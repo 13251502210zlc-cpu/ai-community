@@ -1,11 +1,15 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import path from 'path'
+import fs from 'fs'
 import { prisma } from '../lib/prisma.js'
-import { authRequired, requirePermission } from '../lib/auth.js'
+import { authRequired, getEffectivePermissions, requirePermission } from '../lib/auth.js'
 import type { WorkType } from '../types.js'
 import { publishApprovedCandidate } from '../lib/version-service.js'
+import { getUnsafeTagReason } from '../lib/content-filter.js'
 
 const router = Router()
+const ARCHIVED_DOMAIN_PREFIX = '__archived_domain__:'
 
 // 作品类型校验
 const WORK_TYPES: WorkType[] = ['skill', 'app', 'agent', 'prompt', 'workflow', 'case']
@@ -14,7 +18,9 @@ const createWorkSchema = z.object({
   title: z.string().trim().min(2, '作品名称至少 2 个字符').max(50),
   type: z.enum(WORK_TYPES as [string, ...string[]]),
   category: z.string().trim().min(1, '业务领域不能为空'),
-  tags: z.array(z.string().trim().min(1)).min(1, '至少选择 1 个标签').max(5, '最多选择 5 个标签'),
+  tags: z.array(z.string().trim().min(1).max(30, '单个标签不能超过 30 个字符').refine((tag) => !getUnsafeTagReason(tag), {
+    message: '标签包含敏感词、网址、联系方式或危险代码',
+  })).min(1, '至少选择 1 个标签').max(5, '最多选择 5 个标签'),
   intro: z.string().trim().min(10, '作品简介至少 10 个字符').max(100),
   usage: z.string().trim().min(20, '使用说明至少 20 个字符'),
   businessValue: z.string().max(500).optional(),
@@ -37,7 +43,7 @@ async function serializeWork(workId: string, currentUserId?: string, currentUser
   const work = await prisma.work.findUnique({
     where: { id: workId },
     include: {
-      versions: { orderBy: { createdAt: 'desc' }, include: { attachments: true } },
+      versions: { orderBy: { createdAt: 'desc' }, include: { attachments: true, reviewer: true } },
       attachments: true,
       comments: { orderBy: { createdAt: 'desc' } },
       tags: true,
@@ -55,15 +61,30 @@ async function serializeWork(workId: string, currentUserId?: string, currentUser
   const canManage = work.authorId === currentUserId || currentUserRoles.some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
   const visibleVersions = canManage ? work.versions : work.versions.filter((version) => version.status === 'passed')
   const current = work.versions.find((version) => version.current)
-  const visibleAttachments = canManage
-    ? work.attachments
-    : work.attachments.filter((attachment) => !attachment.versionId || attachment.versionId === current?.id)
+  // v2.0：work 级附件只返回当前线上版本的附件（供详情页下载展示），
+  // 编辑草稿时前端从 version.attachments 读取，避免混入其他版本附件导致验证失败。
+  const visibleAttachments = work.attachments.filter(
+    (attachment) => !attachment.versionId || attachment.versionId === current?.id
+  )
 
   return {
     ...work,
+    publishedAt: work.publishedAt || current?.reviewedAt || current?.createdAt || work.createdAt,
     coreAbilities: work.coreAbilities ? JSON.parse(work.coreAbilities) : [],
     tags: work.tags.map((t) => t.name),
-    versions: visibleVersions,
+    versions: visibleVersions.map((v) => ({
+      ...v,
+      reviewer: v.reviewer?.name,
+      // v2.0：每个版本携带各自的附件列表，供前端编辑草稿时加载
+      attachments: v.attachments.map((a) => ({
+        id: a.id,
+        name: a.name,
+        size: a.size,
+        url: a.url || undefined,
+        storedName: a.storedName || undefined,
+        downloads: a.downloads,
+      })),
+    })),
     attachments: visibleAttachments,
     likedByMe,
     favoritedByMe,
@@ -118,10 +139,22 @@ router.get('/', authRequired, async (req, res, next) => {
       take: size,
     })
 
+    // v2.0：批量查询当前用户的点赞和收藏记录，避免 N+1 查询
+    const workIds = works.map((w) => w.id)
+    const [myLikes, myFavs] = await Promise.all([
+      prisma.userLike.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+      prisma.userFavorite.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+    ])
+    const likedIds = new Set(myLikes.map((l) => l.workId))
+    const favIds = new Set(myFavs.map((f) => f.workId))
+
     res.json({
       items: works.map((w) => ({
         ...w,
+        publishedAt: w.publishedAt || w.versions[0]?.reviewedAt || w.versions[0]?.createdAt || w.createdAt,
         tags: w.tags.map((t) => t.name),
+        likedByMe: likedIds.has(w.id),
+        favoritedByMe: favIds.has(w.id),
       })),
       total,
       page: p,
@@ -134,7 +167,7 @@ router.get('/', authRequired, async (req, res, next) => {
 })
 
 // GET /api/works/recommended —— 运营推荐
-router.get('/recommended', authRequired, async (_req, res, next) => {
+router.get('/recommended', authRequired, async (req, res, next) => {
   try {
     const works = await prisma.work.findMany({
       where: { status: 'published', recommended: true },
@@ -142,7 +175,21 @@ router.get('/recommended', authRequired, async (_req, res, next) => {
       orderBy: { publishedAt: 'desc' },
       include: { tags: true },
     })
-    res.json(works.map((w) => ({ ...w, tags: w.tags.map((t) => t.name) })))
+    // v2.0：批量查询当前用户的点赞和收藏记录
+    const workIds = works.map((w) => w.id)
+    const [myLikes, myFavs] = await Promise.all([
+      prisma.userLike.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+      prisma.userFavorite.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+    ])
+    const likedIds = new Set(myLikes.map((l) => l.workId))
+    const favIds = new Set(myFavs.map((f) => f.workId))
+    res.json(works.map((w) => ({
+      ...w,
+      publishedAt: w.publishedAt || w.createdAt,
+      tags: w.tags.map((t) => t.name),
+      likedByMe: likedIds.has(w.id),
+      favoritedByMe: favIds.has(w.id),
+    })))
   } catch (err) {
     next(err)
   }
@@ -151,7 +198,10 @@ router.get('/recommended', authRequired, async (_req, res, next) => {
 // GET /api/works/domains —— 公开获取业务领域列表（供作品大厅筛选，无需登录）
 router.get('/domains', authRequired, async (_req, res, next) => {
   try {
-    const domains = await prisma.businessDomain.findMany({ orderBy: { sortOrder: 'asc' } })
+    const domains = await prisma.businessDomain.findMany({
+      where: { NOT: { name: { startsWith: ARCHIVED_DOMAIN_PREFIX } } },
+      orderBy: { sortOrder: 'asc' },
+    })
     res.json(domains.map((d) => d.name))
   } catch (err) {
     next(err)
@@ -181,14 +231,14 @@ router.get('/:id', authRequired, async (req, res, next) => {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
+    // 先完成计数再序列化，确保本次详情响应中的浏览量就是最新值。
+    if (rawWork.status === 'published') {
+      await prisma.work.update({ where: { id: req.params.id }, data: { views: { increment: 1 } } })
+    }
     const work = await serializeWork(req.params.id, req.userId, req.userRoles)
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
-    }
-    // 浏览量 +1
-    if (rawWork.status === 'published') {
-      await prisma.work.update({ where: { id: req.params.id }, data: { views: { increment: 1 } } })
     }
     res.json(work)
   } catch (err) {
@@ -317,7 +367,7 @@ router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workMa
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
     if (work.authorId !== req.userId && !canManageAll) {
       res.status(403).json({ error: '无权编辑该作品', code: 'FORBIDDEN' })
       return
@@ -385,6 +435,22 @@ router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workMa
         },
       })
       if (data.attachments !== undefined) {
+        // v2.0：找出将被删除的附件，清理物理文件
+        const keepNames = new Set(data.attachments.map((a) => a.storedName))
+        const removing = await tx.attachment.findMany({
+          where: { versionId: draft.id, storedName: { notIn: [...keepNames] } },
+          select: { storedName: true },
+        })
+        for (const r of removing) {
+          if (r.storedName) {
+            // 仅当该文件没有其他版本引用时才删除物理文件
+            const otherRefs = await tx.attachment.count({ where: { storedName: r.storedName, versionId: { not: draft.id } } })
+            if (otherRefs === 0) {
+              const filePath = path.resolve(process.cwd(), 'uploads', 'attachments', path.basename(r.storedName))
+              if (fs.existsSync(filePath)) fs.unlinkSync(filePath)
+            }
+          }
+        }
         await tx.attachment.deleteMany({ where: { versionId: draft.id } })
         if (data.attachments.length > 0) {
           await tx.attachment.createMany({
@@ -410,14 +476,15 @@ router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workMa
 })
 
 // DELETE /api/works/:id —— 删除作品（软删除：状态 → deleted）
-router.delete('/:id', authRequired, requirePermission('work:deleteOwn'), async (req, res, next) => {
+router.delete('/:id', authRequired, requirePermission('work:deleteOwn', 'admin:workManage'), async (req, res, next) => {
   try {
     const work = await prisma.work.findUnique({ where: { id: req.params.id } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    if (work.authorId !== req.userId && !(req.userRoles || []).includes('super_admin')) {
+    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
+    if (work.authorId !== req.userId && !canManageAll) {
       res.status(403).json({ error: '只能删除自己的作品', code: 'FORBIDDEN' })
       return
     }
@@ -546,6 +613,10 @@ router.post('/:id/comments', authRequired, async (req, res, next) => {
     const { content } = req.body as { content?: string }
     if (!content || content.trim().length < 5) {
       res.status(400).json({ error: '评论内容至少 5 个字符', code: 'VALIDATION_ERROR' })
+      return
+    }
+    if (content.trim().length > 500) {
+      res.status(400).json({ error: '评论内容不能超过 500 个字符', code: 'VALIDATION_ERROR' })
       return
     }
     const work = await prisma.work.findUnique({ where: { id: req.params.id } })

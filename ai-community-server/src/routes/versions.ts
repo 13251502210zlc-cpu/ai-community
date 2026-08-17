@@ -1,14 +1,14 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
-import { authRequired, requirePermission } from '../lib/auth.js'
+import { authRequired, getEffectivePermissions, requirePermission } from '../lib/auth.js'
 import { approveVersion, publishApprovedCandidate } from '../lib/version-service.js'
 
 const router = Router()
 
 const createVersionSchema = z.object({
   // v1.3：v2 及以上版本必须填写更新说明
-  changelog: z.string().trim().min(10, '更新说明至少 10 个字符'),
+  changelog: z.string().trim().min(20, '更新说明至少 20 个字符'),
 })
 
 // GET /api/works/:workId/versions —— 版本列表
@@ -46,7 +46,7 @@ router.post('/:workId/versions', authRequired, requirePermission('work:submit', 
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
     if (work.authorId !== req.userId && !canManageAll) {
       res.status(403).json({ error: '无权为该作品创建版本', code: 'FORBIDDEN' })
       return
@@ -112,7 +112,7 @@ router.post('/:workId/versions/:version/submit', authRequired, requirePermission
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
     if (work.authorId !== req.userId && !canManageAll) {
       res.status(403).json({ error: '无权提交该作品版本', code: 'FORBIDDEN' })
       return
@@ -144,10 +144,11 @@ router.post('/:workId/versions/:version/submit', authRequired, requirePermission
     }
 
     const updated = await prisma.$transaction(async (tx) => {
-      const v = await tx.workVersion.update({
-        where: { id: target.id },
+      const claimed = await tx.workVersion.updateMany({
+        where: { id: target.id, status: 'draft' },
         data: { status: 'pending', submittedAt: new Date() },
       })
+      if (claimed.count !== 1) throw new Error('BUSINESS_该版本已提交审核，请勿重复提交')
       await tx.reviewEvent.create({
         data: {
           workId: work.id,
@@ -157,7 +158,7 @@ router.post('/:workId/versions/:version/submit', authRequired, requirePermission
           isFirstVersion: !work.currentVersion,
         },
       })
-      return v
+      return tx.workVersion.findUniqueOrThrow({ where: { id: target.id } })
     })
 
     res.json(updated)
@@ -245,11 +246,18 @@ router.post('/:workId/versions/:version/reject', authRequired, requirePermission
       return
     }
     if (target.status !== 'pending') {
-      res.status(400).json({ error: '只有待审核版本可以驳回', code: 'BUSINESS_ERROR' })
+      res.status(400).json({ error: '该版本已被审核', code: 'BUSINESS_ERROR' })
       return
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      const claimed = await tx.workVersion.updateMany({
+        where: { id: target.id, status: 'pending' },
+        data: { status: 'reviewing' },
+      })
+      if (claimed.count !== 1) {
+        throw new Error('BUSINESS_该版本已被审核')
+      }
       const v = await tx.workVersion.update({
         where: { id: target.id },
         data: {

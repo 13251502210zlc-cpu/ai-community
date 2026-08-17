@@ -2,7 +2,7 @@
 // 开发环境：http://localhost:3001
 // 生产环境：相对路径 /api（由 nginx 反向代理到后端）
 
-import type { Work, WorkVersion } from '../types'
+import type { Permission, UserRole, Work, WorkVersion } from '../types'
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api'
 const ASSET_BASE = import.meta.env.DEV ? 'http://localhost:3001' : ''
@@ -11,6 +11,7 @@ const ASSET_BASE = import.meta.env.DEV ? 'http://localhost:3001' : ''
 const TOKEN_KEY = 'ai-community-token'
 // v1.4：用户信息存储 key（与 token 同步）
 const USER_KEY = 'aic_current_user'
+export const LOGIN_REDIRECT_KEY = 'aic-login-redirect'
 
 // ============ Token 管理 ============
 
@@ -83,11 +84,22 @@ export async function apiFetch<T = unknown>(
   if (!(options.body instanceof FormData)) {
     headers['Content-Type'] = 'application/json'
   }
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers })
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error('网络异常，请重试')
+    throw error
+  }
 
   // v1.4：401 时清除 token，触发重新登录
   if (res.status === 401) {
     clearToken()
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      const returnPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+      sessionStorage.setItem(LOGIN_REDIRECT_KEY, returnPath)
+      window.location.replace(`/login?expired=1&redirect=${encodeURIComponent(returnPath)}`)
+    }
   }
 
   if (!res.ok) {
@@ -139,6 +151,11 @@ export async function searchWorks(params: {
   if (params.pageSize) query.set('pageSize', String(params.pageSize))
   const qs = query.toString()
   return apiFetch(`/works${qs ? `?${qs}` : ''}`)
+}
+
+// 获取单个作品最新详情（包含当前用户点赞/收藏状态）
+export async function getWorkDetail(workId: string): Promise<any> {
+  return apiFetch(`/works/${encodeURIComponent(workId)}`)
 }
 
 // v2.0：获取运营推荐作品（公开，作品大厅首屏展示）
@@ -195,6 +212,12 @@ export async function getCurrentUser(): Promise<any> {
   return apiFetch('/auth/me')
 }
 
+// 获取当前用户在服务端实际生效的权限
+export async function getMyPermissions(): Promise<Permission[]> {
+  const data = await apiFetch<{ permissions: Permission[] }>('/auth/permissions')
+  return data.permissions
+}
+
 // v1.4：退出登录
 export async function logoutApi(): Promise<void> {
   try {
@@ -215,7 +238,7 @@ export async function getHealthStatus(): Promise<{
 
 // ============ 文件上传（保持原有） ============
 
-export async function uploadCover(file: File): Promise<{ url: string; name: string; size: string }> {
+export async function uploadCover(file: File): Promise<{ url: string; name: string; size: string; storedName?: string }> {
   const formData = new FormData()
   formData.append('file', file)
   return apiFetch('/upload/cover', { method: 'POST', body: formData })
@@ -234,13 +257,28 @@ export async function uploadAttachment(file: File): Promise<{
 }
 
 export async function deleteAttachment(filename: string): Promise<void> {
-  await apiFetch(`/upload/attachment/${filename}`, { method: 'DELETE' })
+  // 生产入口 Nginx 禁止 DELETE，使用语义等价的 POST 操作路由。
+  await apiFetch(`/upload/attachment/${encodeURIComponent(filename)}/delete`, { method: 'POST' })
 }
 
 // 获取后端静态资源完整 URL
 export function assetUrl(path: string): string {
   if (!path) return ''
-  if (path.startsWith('http')) return path
+  if (path.startsWith('http')) {
+    // 兼容历史上直接写入数据库的 COS 地址。统一改走同域封面代理，私有桶也能正常展示。
+    try {
+      const parsed = new URL(path)
+      const matched = parsed.pathname.match(/\/covers\/([^/]+)$/)
+      if (matched) return `${ASSET_BASE}/api/uploads/covers/${encodeURIComponent(decodeURIComponent(matched[1]))}`
+    } catch {
+      // 非法绝对地址继续交给浏览器处理，以便保留原始错误信息。
+    }
+    return path
+  }
+  // v2.0：兼容旧 /uploads/ 路径，统一走 /api 反向代理到后端
+  if (path.startsWith('/uploads/')) {
+    return `${ASSET_BASE}/api${path}`
+  }
   return `${ASSET_BASE}${path}`
 }
 
@@ -268,8 +306,8 @@ export async function downloadAttachmentFile(path: string, filename: string): Pr
 // 区别于 /api/works/* 的"仅自己"限制，管理员可管理平台任意作品
 
 // 管理员下架作品
-export async function adminOfflineWork(workId: string): Promise<{ success: boolean; status: string }> {
-  return apiFetch(`/admin/works/${workId}/offline`, { method: 'POST' })
+export async function adminOfflineWork(workId: string, reason: string): Promise<{ success: boolean; status: string }> {
+  return apiFetch(`/admin/works/${workId}/offline`, { method: 'POST', body: JSON.stringify({ reason }) })
 }
 
 // 管理员上架作品
@@ -522,6 +560,24 @@ export async function publishCandidateVersionApi(workId: string, version: string
 }
 
 // ============ 后台业务领域管理 API ============
+
+export type PermissionMatrixResponse = Record<UserRole, Permission[]>
+
+// 获取数据库中的角色权限矩阵（无自定义配置的角色由后端返回默认权限）
+export async function getPermissionMatrix(): Promise<PermissionMatrixResponse> {
+  return apiFetch('/admin/permission-matrix')
+}
+
+// 更新指定角色的真实权限配置
+export async function updatePermissionMatrix(
+  role: Exclude<UserRole, 'super_admin'>,
+  permissions: Permission[]
+): Promise<{ role: UserRole; permissions: Permission[] }> {
+  return apiFetch(`/admin/permission-matrix/${role}`, {
+    method: 'PUT',
+    body: JSON.stringify({ permissions }),
+  })
+}
 
 // 获取业务领域列表（管理员，含 id）
 export async function getAdminDomains(): Promise<any[]> {

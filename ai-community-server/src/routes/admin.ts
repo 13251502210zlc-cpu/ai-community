@@ -5,8 +5,10 @@ import { prisma } from '../lib/prisma.js'
 import { authRequired, requirePermission } from '../lib/auth.js'
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission, type UserRole } from '../lib/permissions.js'
 import { publishApprovedCandidate } from '../lib/version-service.js'
+import { getUnsafeTagReason } from '../lib/content-filter.js'
 
 const router = Router()
+const ARCHIVED_DOMAIN_PREFIX = '__archived_domain__:'
 
 function serializeAdminUser(user: any) {
   return {
@@ -208,7 +210,10 @@ router.get('/review/stats', requirePermission('review:view'), async (_req, res, 
 // GET /api/admin/domains
 router.get('/domains', requirePermission('admin:domain'), async (_req, res, next) => {
   try {
-    const domains = await prisma.businessDomain.findMany({ orderBy: { sortOrder: 'asc' } })
+    const domains = await prisma.businessDomain.findMany({
+      where: { NOT: { name: { startsWith: ARCHIVED_DOMAIN_PREFIX } } },
+      orderBy: { sortOrder: 'asc' },
+    })
     res.json(domains)
   } catch (err) {
     next(err)
@@ -251,7 +256,34 @@ router.put('/domains/:id', requirePermission('admin:domain'), async (req, res, n
 // DELETE /api/admin/domains/:id
 router.delete('/domains/:id', requirePermission('admin:domain'), async (req, res, next) => {
   try {
-    await prisma.businessDomain.delete({ where: { id: req.params.id } })
+    const domain = await prisma.businessDomain.findUnique({ where: { id: req.params.id } })
+    if (!domain) {
+      res.status(404).json({ error: '业务领域不存在', code: 'NOT_FOUND' })
+      return
+    }
+    const activeWorkCount = await prisma.work.count({
+      where: { category: domain.name, status: { not: 'deleted' } },
+    })
+    if (activeWorkCount > 0) {
+      res.status(409).json({ error: `该业务领域仍有关联的有效作品（${activeWorkCount} 个），无法删除`, code: 'DOMAIN_IN_USE' })
+      return
+    }
+    await prisma.$transaction(async (tx) => {
+      const deletedWorkCount = await tx.work.count({ where: { category: domain.name, status: 'deleted' } })
+      if (deletedWorkCount > 0) {
+        const archivedName = `${ARCHIVED_DOMAIN_PREFIX}${domain.id}:${domain.name}`
+        await tx.businessDomain.upsert({
+          where: { name: archivedName },
+          update: {},
+          create: { name: archivedName, sortOrder: domain.sortOrder },
+        })
+        await tx.work.updateMany({
+          where: { category: domain.name, status: 'deleted' },
+          data: { category: archivedName },
+        })
+      }
+      await tx.businessDomain.delete({ where: { id: domain.id } })
+    })
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -276,6 +308,11 @@ router.post('/tags', requirePermission('admin:tag'), async (req, res, next) => {
     const { name } = req.body as { name?: string }
     if (!name || !name.trim()) {
       res.status(400).json({ error: '标签名称不能为空', code: 'VALIDATION_ERROR' })
+      return
+    }
+    const unsafeReason = getUnsafeTagReason(name)
+    if (unsafeReason) {
+      res.status(400).json({ error: unsafeReason, code: 'SENSITIVE_TAG' })
       return
     }
     const tag = await prisma.tag.create({ data: { name: name.trim() } })
@@ -568,8 +605,20 @@ router.get('/works', requirePermission('admin:workRead'), async (req, res, next)
         take: pageSize,
       }),
     ])
+    const workIds = items.map((work) => work.id)
+    const [myLikes, myFavorites] = await Promise.all([
+      prisma.userLike.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+      prisma.userFavorite.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+    ])
+    const likedIds = new Set(myLikes.map((item) => item.workId))
+    const favoriteIds = new Set(myFavorites.map((item) => item.workId))
     res.json({
-      items: items.map((work) => ({ ...work, tags: work.tags.map((tag) => tag.name) })),
+      items: items.map((work) => ({
+        ...work,
+        tags: work.tags.map((tag) => tag.name),
+        likedByMe: likedIds.has(work.id),
+        favoritedByMe: favoriteIds.has(work.id),
+      })),
       total,
       page,
       pageSize,
@@ -605,6 +654,11 @@ router.post('/works/:id/recommend', requirePermission('admin:recommend'), async 
 // POST /api/admin/works/:id/offline —— 管理员下架作品（已发布 → 已下架）
 router.post('/works/:id/offline', requirePermission('admin:workManage'), async (req, res, next) => {
   try {
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : ''
+    if (reason.length < 5) {
+      res.status(400).json({ error: '强制下架原因至少 5 个字符', code: 'VALIDATION_ERROR' })
+      return
+    }
     const work = await prisma.work.findUnique({ where: { id: req.params.id } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
@@ -615,7 +669,7 @@ router.post('/works/:id/offline', requirePermission('admin:workManage'), async (
       return
     }
     await prisma.work.update({ where: { id: req.params.id }, data: { status: 'offline' } })
-    res.json({ success: true, status: 'offline' })
+    res.json({ success: true, status: 'offline', reason })
   } catch (err) {
     next(err)
   }

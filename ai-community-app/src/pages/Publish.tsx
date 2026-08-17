@@ -7,6 +7,7 @@ import { WorkStatusBadge, VersionStatusBadge } from '../components/Tags'
 import type { WorkType, Work, WorkVersion, VersionStatus } from '../types'
 import { TYPE_SPEC_CONFIG } from '../types'
 import { uploadCover, uploadAttachment, deleteAttachment, assetUrl, createVersionApi, downloadAttachmentFile } from '../lib/api'
+import { nowDate, nowDateTime } from '../lib/datetime'
 
 // v1.3：计算下一个版本号（v1/v2/v3 递增格式）
 function nextVersion(versions: WorkVersion[]): string {
@@ -49,9 +50,20 @@ export default function Publish() {
   const [coverFile, setCoverFile] = useState<{ url: string; name: string; size: string } | null>(
     editingWork?.coverUrl ? { url: editingWork.coverUrl, name: '已上传封面', size: '' } : null
   )
-  const [attachments, setAttachments] = useState<{ id: string; name: string; size: string; url?: string; storedName?: string }[]>(
-    editingWork?.attachments.map((a) => ({ id: a.id, name: a.name, size: a.size, url: a.url, storedName: a.storedName })) || []
-  )
+  // v2.0：附件初始化逻辑
+  // - 编辑现有草稿/驳回版本：加载该版本自己的附件
+  // - 新建版本：继承当前线上版本的附件（后端 createVersion 也会复制这些附件到新草稿）
+  //   用户可在编辑页删除不需要的附件，保存时后端按提交的列表重建
+  const initialAttachments = useMemo(() => {
+    if (!editingWork) return []
+    const editable = findEditableVersion(editingWork)
+    const source = editable || editingWork.versions.find((v) => v.current) || editingWork.versions[0]
+    if (!source) return []
+    return (source.attachments || []).map((a) => ({
+      id: a.id, name: a.name, size: a.size, url: a.url, storedName: a.storedName
+    }))
+  }, [editingWork])
+  const [attachments, setAttachments] = useState<{ id: string; name: string; size: string; url?: string; storedName?: string }[]>(initialAttachments)
   const [uploadingCover, setUploadingCover] = useState(false)
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   // v2.0：附件删除中状态（按 storedName 跟踪，避免并发删除时 UI 闪烁）
@@ -59,19 +71,21 @@ export default function Publish() {
   const [downloadingAttachment, setDownloadingAttachment] = useState<string | null>(null)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const attachmentInputRef = useRef<HTMLInputElement>(null)
+  // 只记录本次打开编辑页后新上传、尚未关联到作品版本的附件。
+  const pendingAttachmentNamesRef = useRef(new Set<string>())
   const [customTag, setCustomTag] = useState('')
   const [changelog, setChangelog] = useState('')
 
-  // v2.0：移除附件——调用后端 DELETE 接口清理磁盘文件，再更新表单 state
-  // 仅清理"本次新上传"的附件（有 storedName）；编辑已有作品时旧附件无 storedName，仅从表单移除
+  // v2.1：本次新上传的附件立即清理物理文件；已有版本附件仅从当前编辑表单移除，保存时由版本更新事务处理。
   const handleRemoveAttachment = async (index: number) => {
     const att = attachments[index]
     if (!att) return
-    // 有 storedName 表示是新上传的文件，需调用后端删除磁盘文件
-    if (att.storedName) {
+    const isPendingUpload = !!att.storedName && pendingAttachmentNamesRef.current.has(att.storedName)
+    if (isPendingUpload && att.storedName) {
       setDeletingAttachment(att.storedName)
       try {
         await deleteAttachment(att.storedName)
+        pendingAttachmentNamesRef.current.delete(att.storedName)
       } catch (err) {
         addToast('error', err instanceof Error ? err.message : '附件删除失败，请重试')
         setDeletingAttachment(null)
@@ -109,12 +123,24 @@ export default function Publish() {
     : 'v1'
   // v1.3：附件要求（按当前作品类型）
   const attachmentRequired = TYPE_SPEC_CONFIG[type].attachmentRequired
-  // v1.3：更新说明是否必填（编辑模式且非 v1 版本时必填，≥ 10 字符）
+  // 更新说明前后端统一为至少 20 个字符
   const isChangelogRequired = !!editingWork && operatingVersion !== 'v1'
 
   const handleAddTag = (tag: string) => {
-    if (tag.trim() && !tags.includes(tag.trim()) && tags.length < 5) {
-      setTags([...tags, tag.trim()])
+    const value = tag.trim()
+    const blockedTerms = ['色情', '赌博', '博彩', '毒品', '反动', '恐怖主义', '枪支弹药', '代开发票', '买卖账号']
+    const blocked = blockedTerms.find((term) => value.includes(term))
+    const invalidPattern = /<\/?(?:script|iframe|object|embed)\b|https?:\/\/|www\.|(?:微信|vx|qq|电话|手机)\s*[:：]?\s*[a-z0-9_-]{5,}/i.test(value)
+    if (blocked || invalidPattern) {
+      addToast('error', blocked ? `标签包含敏感词“${blocked}”` : '标签不能包含网址、联系方式或危险代码')
+      return
+    }
+    if (value.length > 30) {
+      addToast('error', '单个标签不能超过 30 个字符')
+      return
+    }
+    if (value && !tags.includes(value) && tags.length < 5) {
+      setTags([...tags, value])
     }
     setCustomTag('')
   }
@@ -159,8 +185,8 @@ export default function Publish() {
 
   // v1.1：新建作品（首版本）
   const buildNewWork = (versionStatus: VersionStatus): Work => {
-    const now = new Date().toISOString().slice(0, 10)
-    const nowFull = new Date().toISOString().slice(0, 16).replace('T', ' ')
+    const now = nowDate()
+    const nowFull = nowDateTime()
     return {
       id: `w${Date.now()}`,
       ...buildWorkBase(),
@@ -190,7 +216,7 @@ export default function Publish() {
 
   // v1.1：构建新版本对象（编辑已发布/已下架作品时；v1.3：记录 baseVersionId）
   const buildNewVersion = (): WorkVersion => {
-    const now = new Date().toISOString().slice(0, 10)
+    const now = nowDate()
     return {
       version: operatingVersion,
       changelog: changelog.trim() || '版本更新',
@@ -222,18 +248,22 @@ export default function Publish() {
           ),
         })
         if (!ok) {
-          addToast('error', '草稿保存失败')
           return
         }
       } else {
         // 新增草稿版本
-        const createdVersion = await createVersionApi(editingWork.id, changelog.trim())
+        let createdVersion
+        try {
+          createdVersion = await createVersionApi(editingWork.id, changelog.trim())
+        } catch (err) {
+          addToast('error', err instanceof Error ? err.message : '创建版本失败')
+          return
+        }
         const ok = await updateWork(editingWork.id, {
           ...base,
           versions: [{ ...buildNewVersion(), version: createdVersion.version }, ...editingWork.versions],
         })
         if (!ok) {
-          addToast('error', '草稿保存失败')
           return
         }
       }
@@ -262,14 +292,14 @@ export default function Publish() {
       addToast('error', '该类型作品必须上传附件')
       return
     }
-    // v1.3：更新说明条件必填校验（编辑模式且非 v1 版本，≥ 10 字符）
+    // 更新说明前后端统一为至少 20 个字符
     if (isChangelogRequired) {
       if (!changelog.trim()) {
         addToast('error', '请填写版本更新说明')
         return
       }
-      if (changelog.trim().length < 10) {
-        addToast('error', '更新说明至少 10 个字符')
+      if (changelog.trim().length < 20) {
+        addToast('error', '更新说明至少 20 个字符')
         return
       }
     }
@@ -290,28 +320,29 @@ export default function Publish() {
           ),
         })
         if (!ok) {
-          addToast('error', '提交审核失败')
           return
         }
       } else {
         // 新增草稿版本，再提交审核
-        const createdVersion = await createVersionApi(editingWork.id, changelog.trim())
+        let createdVersion
+        try {
+          createdVersion = await createVersionApi(editingWork.id, changelog.trim())
+        } catch (err) {
+          addToast('error', err instanceof Error ? err.message : '创建版本失败')
+          return
+        }
         targetVersion = createdVersion.version
         const ok = await updateWork(editingWork.id, {
           ...base,
           versions: [{ ...buildNewVersion(), version: createdVersion.version }, ...editingWork.versions],
         })
         if (!ok) {
-          addToast('error', '提交审核失败')
           return
         }
       }
       // 调用版本级提交审核
       const submitted = await submitVersionForReview(workId, targetVersion)
-      if (!submitted) {
-        addToast('error', '提交审核失败')
-        return
-      }
+      if (!submitted) return
       addToast('success', `版本 ${operatingVersion} 已提交审核，请等待管理员审核`)
     } else {
       // 新建作品直接提交审核
@@ -322,10 +353,7 @@ export default function Publish() {
         return
       }
       const submitted = await submitVersionForReview(created.id, created.versions[0].version)
-      if (!submitted) {
-        addToast('error', '作品已保存为草稿，但提交审核失败，请在个人中心重试')
-        return
-      }
+      if (!submitted) return
       addToast('success', `版本 ${operatingVersion} 已提交审核，请等待管理员审核`)
     }
     navigate('/profile')
@@ -563,7 +591,7 @@ export default function Publish() {
                   <Loader2 size={24} className="animate-spin text-muted-foreground" />
                 ) : coverFile ? (
                   <div className="relative w-full h-full rounded-lg overflow-hidden">
-                    <img src={assetUrl(coverFile.url)} alt="封面预览" className="w-full h-full object-cover" />
+                    <img src={assetUrl(coverFile.url)} alt="封面预览" className="w-full h-full bg-muted object-contain" />
                     <button
                       type="button"
                       onClick={(e) => {
@@ -609,9 +637,15 @@ export default function Publish() {
                     onChange={async (e) => {
                       const file = e.target.files?.[0]
                       if (!file) return
+                      if (file.size > 50 * 1024 * 1024) {
+                        addToast('error', '附件不能超过 50MB（恰好 50MB 可以上传）')
+                        if (attachmentInputRef.current) attachmentInputRef.current.value = ''
+                        return
+                      }
                       setUploadingAttachment(true)
                       try {
                         const result = await uploadAttachment(file)
+                        pendingAttachmentNamesRef.current.add(result.storedName)
                         setAttachments((prev) => [...prev, result])
                         addToast('success', `附件 ${result.name} 上传成功`)
                       } catch (err) {

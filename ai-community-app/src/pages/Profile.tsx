@@ -1,5 +1,5 @@
 import { useState, Fragment, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Plus, Edit, Undo, MessageSquareWarning, Clock, CheckCircle, XCircle, ArrowUpCircle } from 'lucide-react'
 import { useApp } from '../store/AppStore'
 import { TypeTag, WorkStatusBadge, Avatar } from '../components/Tags'
@@ -30,6 +30,7 @@ function pickDisplayVersion(work: Work): WorkVersion | undefined {
 }
 
 export default function Profile() {
+  const navigate = useNavigate()
   const { works, events, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast } = useApp()
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('works')
   const [showRejectId, setShowRejectId] = useState<string | null>(null)
@@ -51,24 +52,28 @@ export default function Profile() {
 
   const handleWithdraw = async (workId: string, version: string, title: string) => {
     const ok = await withdrawVersion(workId, version)
-    addToast(ok ? 'success' : 'error', ok ? `「${title} ${version}」已撤回，可在草稿中继续编辑` : '撤回失败，请重试')
+    if (ok) addToast('success', `「${title} ${version}」已撤回，可在草稿中继续编辑`)
   }
 
   const handleEdit = async (workId: string, version: string, status: string) => {
     // 已驳回版本进入编辑时回退到草稿
     if (status === 'rejected') {
       const ok = await startModifyRejected(workId, version)
-      if (!ok) addToast('error', '操作失败，请重试')
+      if (!ok) return
     }
+  }
+
+  const handleGoModify = async (workId: string, version: string) => {
+    const ok = await startModifyRejected(workId, version)
+    if (!ok) return
+    setShowRejectId(null)
+    navigate(`/publish?edit=${encodeURIComponent(workId)}`)
   }
 
   const handlePublishCandidate = async (work: Work, version: WorkVersion) => {
     if (!window.confirm(`确认上线《${work.title}》的候选版本 ${version.version}？上线后将替换原线上版本并恢复作品展示。`)) return
     const ok = await publishCandidateVersion(work.id, version.version)
-    addToast(
-      ok ? 'success' : 'error',
-      ok ? `《${work.title}》${version.version} 已确认上线` : '候选版本上线失败，请刷新后重试',
-    )
+    if (ok) addToast('success', `《${work.title}》${version.version} 已确认上线`)
   }
 
   return (
@@ -199,6 +204,14 @@ export default function Profile() {
                                   {vStatus === 'pending' ? '待审核' : vStatus === 'rejected' ? '已驳回' : '草稿'} {displayVersion.version}
                                 </span>
                               )}
+                              {displayVersion && vStatus === 'passed' && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium w-fit"
+                                  style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}
+                                >
+                                  已通过 {displayVersion.version}
+                                </span>
+                              )}
                               {candidateVersion && w.status === 'offline' && (
                                 <span
                                   className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium w-fit"
@@ -215,14 +228,14 @@ export default function Profile() {
                           </td>
                           <td className="p-3">
                             <div className="flex gap-1 flex-wrap">
-                              {canEdit && (
+                              {canEdit && !hasRejected && (
                                 <Link
                                   to={`/publish?edit=${w.id}`}
                                   onClick={() => displayVersion && handleEdit(w.id, displayVersion.version, displayVersion.status)}
                                   className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:border-primary hover:text-primary"
                                   style={{ borderColor: 'var(--aic-border-solid)' }}
                                 >
-                                  <Edit size={11} /> {hasRejected ? '去修改' : '编辑'}
+                                  <Edit size={11} /> 编辑
                                 </Link>
                               )}
                               {hasPending && displayVersion && (
@@ -266,7 +279,25 @@ export default function Profile() {
                                     驳回修改意见 · {v.version}
                                   </div>
                                   <p className="text-sm text-muted-foreground mb-2">{v.rejectReason}</p>
-                                  <div className="text-xs text-muted-foreground">审核人：{v.reviewer} · {v.reviewedAt}</div>
+                                  <div className="text-xs text-muted-foreground">审核人：{v.reviewer || '审核管理员'} · {v.reviewedAt || '—'}</div>
+                                  <div className="flex gap-2 mt-3">
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowRejectId(null)}
+                                      className="rounded border px-3 py-1.5 text-xs font-medium"
+                                      style={{ borderColor: 'var(--aic-border-solid)' }}
+                                    >
+                                      关闭
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleGoModify(w.id, v.version)}
+                                      className="inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium text-white"
+                                      style={{ backgroundColor: 'var(--aic-primary)' }}
+                                    >
+                                      <Edit size={11} /> 去修改
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </td>
@@ -345,9 +376,9 @@ export default function Profile() {
                         <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--aic-violet-light)', color: 'var(--aic-gradient-violet)' }}>首版本</span>
                       )}
                     </div>
-                    <div className="text-sm font-semibold">
+                    <Link to={`/works/${e.workId}`} className="text-sm font-semibold hover:text-primary hover:underline">
                       {e.workTitle} — {isApproved ? '审核通过' : isRejected ? '审核驳回' : '提交审核'}
-                    </div>
+                    </Link>
                     {isApproved && (
                       <div className="text-xs mt-0.5" style={{ color: 'var(--state-success)' }}>
                         {e.isFirstVersion ? '作品首次发布至大厅' : `新版本 ${e.version} 已替换线上版本`}

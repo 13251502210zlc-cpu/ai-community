@@ -1,10 +1,11 @@
-import { Router } from 'express'
+import { Router, type RequestHandler } from 'express'
 import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
 import { authRequired } from '../lib/auth.js'
 import { prisma } from '../lib/prisma.js'
+import { persistCover } from '../lib/file-storage.js'
 
 const router = Router()
 
@@ -39,14 +40,14 @@ const coverUpload = multer({
   },
 })
 
-// 附件上传：支持 PRD 允许的常见文件类型，限制 100MB
+// 附件上传：最大 50 MiB；multer 的上限为包含边界，恰好 50 MiB 可上传。
 const attachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, ATTACHMENT_DIR),
   filename: (_req, file, cb) => cb(null, genFileName(file.originalname)),
 })
 const attachmentUpload = multer({
   storage: attachmentStorage,
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     // 禁止可执行脚本（安全考虑）
     const forbidden = /\.(exe|bat|cmd|sh|js|ts)$/i
@@ -66,16 +67,23 @@ function formatSize(bytes: number): string {
 }
 
 // POST /api/upload/cover —— 封面上传
-router.post('/cover', authRequired, coverUpload.single('file'), (req, res) => {
+router.post('/cover', authRequired, coverUpload.single('file'), async (req, res, next) => {
   if (!req.file) {
     res.status(400).json({ error: '请选择封面图片', code: 'VALIDATION_ERROR' })
     return
   }
-  res.json({
-    url: `/uploads/covers/${req.file.filename}`,
-    name: req.file.originalname,
-    size: formatSize(req.file.size),
-  })
+  try {
+    const stored = await persistCover(req.file)
+    res.json({
+      url: stored.url,
+      storedName: stored.storedName,
+      name: req.file.originalname,
+      size: formatSize(req.file.size),
+    })
+  } catch (error) {
+    fs.rmSync(req.file.path, { force: true })
+    next(error)
+  }
 })
 
 // POST /api/upload/attachment —— 附件上传
@@ -124,8 +132,9 @@ router.get('/attachment/:filename', authRequired, async (req, res, next) => {
   }
 })
 
-// DELETE /api/upload/attachment/:filename —— 仅上传者可删除未关联文件或自己的草稿附件
-router.delete('/attachment/:filename', authRequired, async (req, res, next) => {
+// 删除附件：仅上传者可删除未关联文件或自己的草稿附件。
+// 同时提供 POST 兼容入口，供禁止 DELETE 方法的生产网关使用。
+const removeAttachment: RequestHandler = async (req, res, next) => {
   try {
     const filename = path.basename(req.params.filename)
     const pending = await prisma.pendingUpload.findUnique({ where: { storedName: filename } })
@@ -158,6 +167,9 @@ router.delete('/attachment/:filename', authRequired, async (req, res, next) => {
   } catch (error) {
     next(error)
   }
-})
+}
+
+router.delete('/attachment/:filename', authRequired, removeAttachment)
+router.post('/attachment/:filename/delete', authRequired, removeAttachment)
 
 export default router

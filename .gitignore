@@ -3,6 +3,7 @@
 **/dist/
 **/build/
 **/*.tsbuildinfo
+**/prisma/generated/
 
 # Local environment and secrets
 **/.env

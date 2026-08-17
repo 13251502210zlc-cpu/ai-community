@@ -4,17 +4,16 @@ import { Menu, X, Shield, LogOut } from 'lucide-react'
 import { useApp } from '../store/AppStore'
 import { Avatar } from './Tags'
 import { ROLE_CONFIG } from '../types'
-import type { UserRole } from '../types'
 
-// 全部导航项定义（v1.3：按角色动态过滤）
+// 普通入口对所有登录用户开放；后台入口按服务端动态权限显示。
 const ALL_NAV_ITEMS = [
-  { to: '/', label: '作品大厅', roles: ['user', 'creator', 'reviewer', 'operator', 'super_admin'] as UserRole[] },
-  { to: '/profile', label: '个人中心', roles: ['user', 'creator', 'reviewer', 'operator', 'super_admin'] as UserRole[] },
-  { to: '/admin', label: '后台管理', roles: ['reviewer', 'operator', 'super_admin'] as UserRole[] },
+  { to: '/', label: '作品大厅', admin: false },
+  { to: '/profile', label: '个人中心', admin: false },
+  { to: '/admin', label: '后台管理', admin: true },
 ]
 
 export default function Header() {
-  const { currentUser, logout, addToast } = useApp()
+  const { currentUser, logout, addToast, hasPermission } = useApp()
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -25,10 +24,14 @@ export default function Header() {
     navigate('/login')
   }
 
-  // v1.7：根据多角色过滤可见导航项（任一角色匹配即可见）
+  const canEnterAdmin = [
+    'review:view', 'admin:workRead', 'admin:domain', 'admin:tag', 'admin:user',
+    'admin:recommend', 'admin:stats', 'admin:role',
+  ].some((permission) => hasPermission(permission as Parameters<typeof hasPermission>[0]))
+
   const navItems = useMemo(
-    () => ALL_NAV_ITEMS.filter((item) => item.roles.some((r) => currentUser.roles.includes(r))),
-    [currentUser.roles]
+    () => ALL_NAV_ITEMS.filter((item) => !item.admin || canEnterAdmin),
+    [canEnterAdmin]
   )
 
   // v1.7：主角色配置（roles[0]）用于徽章展示

@@ -356,6 +356,8 @@ x-user-name: 周涛
 
 ### 4.3 `DELETE /api/upload/attachment/:filename`
 
+生产网关兼容调用：`POST /api/upload/attachment/:filename/delete`，权限、参数和响应完全相同。前端默认使用该 POST 路径。
+
 删除未关联到作品的附件。
 
 **路径参数**：`filename`（存储文件名）

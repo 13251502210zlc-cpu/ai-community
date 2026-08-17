@@ -75,14 +75,14 @@ export async function approveVersion(
     const target = work.versions.find((v) => v.version === version)
     if (!target) throw new Error('BUSINESS_版本不存在')
     if (target.status !== 'pending') {
-      throw new Error('BUSINESS_该版本不在待审核状态')
+      throw new Error('BUSINESS_该版本已被审核')
     }
     const claimed = await tx.workVersion.updateMany({
       where: { id: target.id, status: 'pending' },
       data: { status: 'reviewing' },
     })
     if (claimed.count !== 1) {
-      throw new Error('BUSINESS_该版本已被其他审核员处理')
+      throw new Error('BUSINESS_该版本已被审核')
     }
 
     const now = new Date()

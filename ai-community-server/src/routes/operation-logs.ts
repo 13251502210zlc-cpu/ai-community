@@ -198,7 +198,9 @@ router.get('/export', authRequired, async (req: Request, res: Response, next: Ne
       .join('\n')
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-    res.setHeader('Content-Disposition', `attachment; filename="operation-logs-${new Date().toISOString().slice(0, 10)}.csv"`)
+    // v2.0：使用北京时间日期作为文件名（process.env.TZ 已设为 Asia/Shanghai）
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' })
+    res.setHeader('Content-Disposition', `attachment; filename="operation-logs-${today}.csv"`)
     res.send('\ufeff' + csv)
   } catch (err) {
     next(err)

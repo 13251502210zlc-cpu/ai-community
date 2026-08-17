@@ -1,8 +1,9 @@
 import { Router, type RequestHandler } from 'express'
 import bcrypt from 'bcryptjs'
+import crypto from 'crypto'
 import { prisma } from '../lib/prisma.js'
-import { authRequired } from '../lib/auth.js'
-import { signToken } from '../lib/jwt.js'
+import { authRequired, getEffectivePermissions } from '../lib/auth.js'
+import { detectDeviceType, signToken } from '../lib/jwt.js'
 
 const router = Router()
 // 用户内容使用独立路由挂载到 /api/users；/api/auth/users 保留向后兼容。
@@ -90,6 +91,8 @@ router.post('/login', async (req, res, next) => {
 
     // 登录成功：重置失败次数、更新登录时间；自动迁移历史明文密码
     const passwordNeedsUpgrade = storedPwd.length > 0 && !/^\$2[aby]\$/.test(storedPwd)
+    const deviceType = detectDeviceType(req.get('user-agent') || '')
+    const sessionId = crypto.randomUUID()
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -98,6 +101,7 @@ router.post('/login', async (req, res, next) => {
         lockedUntil: null,
         lastLoginAt: new Date(),
         ...(passwordNeedsUpgrade ? { password: await bcrypt.hash(password, 12) } : {}),
+        ...(deviceType === 'mobile' ? { mobileSessionId: sessionId } : { pcSessionId: sessionId }),
       },
     })
 
@@ -130,6 +134,8 @@ router.post('/login', async (req, res, next) => {
       roles,
       name: user.name,
       loginType: 'password',
+      sessionId,
+      deviceType,
     }, rememberMe ? '7d' : '12h')
 
     res.json({
@@ -157,7 +163,15 @@ router.post('/login', async (req, res, next) => {
  */
 router.post('/logout', authRequired, async (req, res, next) => {
   try {
-    // 可选：记录登出时间（与 lastLoginAt 区分，这里仅返回成功）
+    if (req.sessionId && req.deviceType) {
+      await prisma.user.updateMany({
+        where: {
+          id: req.userId,
+          ...(req.deviceType === 'mobile' ? { mobileSessionId: req.sessionId } : { pcSessionId: req.sessionId }),
+        },
+        data: req.deviceType === 'mobile' ? { mobileSessionId: null } : { pcSessionId: null },
+      })
+    }
     res.json({ success: true, message: '已退出登录' })
   } catch (err) {
     next(err)
@@ -196,6 +210,16 @@ router.get('/me', authRequired, async (req, res, next) => {
   }
 })
 
+// GET /api/auth/permissions —— 当前登录用户的服务端实际生效权限
+router.get('/permissions', authRequired, async (req, res, next) => {
+  try {
+    const permissions = await getEffectivePermissions(req.userRoles || [])
+    res.json({ permissions })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // POST /api/auth/switch-role —— 切换/设置角色（v1.7：支持多角色）
 // body: { roles: UserRole[] } —— 设置多个角色（权限取并集）
 // 兼容旧版 { role: UserRole } —— 单角色设置
@@ -219,14 +243,30 @@ const getUserWorks: RequestHandler = async (req, res, next) => {
     }
     const works = await prisma.work.findMany({
       where: { authorId: req.params.id, status: { not: 'deleted' } },
-      include: { tags: true, versions: true },
+      include: {
+        tags: true,
+        versions: { include: { reviewer: true, attachments: true }, orderBy: { createdAt: 'desc' } },
+      },
       orderBy: { createdAt: 'desc' },
     })
+    const workIds = works.map((work) => work.id)
+    const [myLikes, myFavorites] = await Promise.all([
+      prisma.userLike.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+      prisma.userFavorite.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
+    ])
+    const likedIds = new Set(myLikes.map((item) => item.workId))
+    const favoriteIds = new Set(myFavorites.map((item) => item.workId))
     res.json(
       works.map((w) => ({
         ...w,
         tags: w.tags.map((t) => t.name),
         coreAbilities: w.coreAbilities ? JSON.parse(w.coreAbilities) : [],
+        versions: w.versions.map((version) => ({
+          ...version,
+          reviewer: version.reviewer?.name,
+        })),
+        likedByMe: likedIds.has(w.id),
+        favoritedByMe: favoriteIds.has(w.id),
       }))
     )
   } catch (err) {
@@ -247,10 +287,18 @@ const getUserFavorites: RequestHandler = async (req, res, next) => {
         work: { include: { tags: true } },
       },
     })
+    const workIds = favorites.map((favorite) => favorite.workId)
+    const myLikes = await prisma.userLike.findMany({
+      where: { userId: req.userId!, workId: { in: workIds } },
+      select: { workId: true },
+    })
+    const likedIds = new Set(myLikes.map((item) => item.workId))
     res.json(
       favorites.map((f) => ({
         ...f.work,
         tags: f.work.tags.map((t) => t.name),
+        likedByMe: likedIds.has(f.workId),
+        favoritedByMe: true,
       }))
     )
   } catch (err) {

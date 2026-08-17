@@ -65,6 +65,8 @@ export interface WorkVersion {
   baseVersionId?: string
   // v1.3：审核通过但因作品已下架或 base_version_id 过期未自动上线时标记为候选版本
   candidate?: boolean
+  // v2.0：版本级附件列表（编辑草稿时加载此版本自己的附件）
+  attachments?: Attachment[]
 }
 
 // 评论
@@ -131,10 +133,10 @@ export interface Work {
 export const TYPE_CONFIG: Record<WorkType, { label: string; icon: string; coverClass: string; color: string; bg: string }> = {
   skill: { label: 'Skill', icon: '🔧', coverClass: 'cover-skill', color: 'var(--aic-primary)', bg: 'var(--aic-primary-light)' },
   app: { label: '应用程序', icon: '📱', coverClass: 'cover-app', color: 'var(--state-info)', bg: 'var(--state-info-bg)' },
-  agent: { label: '智能体', icon: '🤖', coverClass: 'cover-agent', color: 'var(--state-warning)', bg: 'var(--state-warning-bg)' },
+  agent: { label: '智能体', icon: '🤖', coverClass: 'cover-agent', color: '#dc2626', bg: '#fef2f2' },
   prompt: { label: '提示词', icon: '💬', coverClass: 'cover-prompt', color: 'var(--state-success)', bg: 'var(--state-success-bg)' },
   workflow: { label: '工作流', icon: '⚡', coverClass: 'cover-workflow', color: 'var(--aic-gradient-violet)', bg: 'var(--aic-violet-light)' },
-  case: { label: '案例方案', icon: '📋', coverClass: 'cover-case', color: 'var(--state-warning)', bg: 'var(--state-warning-bg)' },
+  case: { label: '案例方案', icon: '📋', coverClass: 'cover-case', color: '#ea580c', bg: '#fff7ed' },
 }
 
 // v1.3 作品类型差异化矩阵：专属字段、主操作、附件要求
@@ -251,17 +253,19 @@ export type Permission =
   | 'admin:recommend' // 运营推荐
   | 'admin:role' // 权限配置 / 角色分配
   | 'admin:stats' // 数据统计
+  | 'admin:workRead' // 查看全部状态作品
+  | 'admin:workManage' // 管理任意作品
 
 // v1.7：单角色权限表（与后端 ROLE_PERMISSIONS 保持一致）
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   user: ['work:read', 'work:create'],
   creator: ['work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn'],
-  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'review:forceOffline'],
-  operator: ['work:read', 'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats'],
+  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'review:forceOffline', 'admin:workRead', 'admin:workManage'],
+  operator: ['work:read', 'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:workRead', 'admin:workManage'],
   super_admin: [
     'work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn',
     'review:view', 'review:approve', 'review:reject', 'review:forceOffline',
-    'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:role',
+    'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:role', 'admin:workRead', 'admin:workManage',
   ],
 }
 

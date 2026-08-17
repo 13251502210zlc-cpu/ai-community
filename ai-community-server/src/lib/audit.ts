@@ -37,9 +37,11 @@ export function auditMutations(req: Request, res: Response, next: NextFunction) 
           role: roles.map((role) => ROLE_LABELS[role as UserRole] || role).join('、'),
           module: moduleForPath(req.originalUrl),
           action: actionForMethod(req.method, req.originalUrl),
-          content: `${req.method} ${req.originalUrl.split('?')[0]}`,
+          content: req.originalUrl.includes('/offline') && typeof req.body?.reason === 'string'
+            ? `${req.method} ${req.originalUrl.split('?')[0]}；下架原因：${req.body.reason.trim()}`
+            : `${req.method} ${req.originalUrl.split('?')[0]}`,
           target: req.params?.id || req.params?.workId || '',
-          ip: req.ip || req.socket.remoteAddress || '',
+          ip: (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, ''),
           result: res.statusCode < 400 ? 'success' : 'failed',
         },
       }))

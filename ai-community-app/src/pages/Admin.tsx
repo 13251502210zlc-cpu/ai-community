@@ -8,13 +8,13 @@ import {
   ChevronLeft, ChevronRight, ArrowUpCircle, ArrowDownCircle, Download,
 } from 'lucide-react'
 import { useApp } from '../store/AppStore'
-import { getReviewQueue, getReviewStats, getOperationLogs, exportOperationLogs } from '../lib/api'
+import { downloadAttachmentFile, getReviewQueue, getReviewStats, getOperationLogs, exportOperationLogs, getPermissionMatrix, updatePermissionMatrix } from '../lib/api'
 import type { OperationLogItem } from '../lib/api'
-import { TYPE_CONFIG, ROLE_CONFIG, hasPermission as checkPerm, hasRole as checkRole, ALL_ROLES } from '../types'
-import type { UserRole, Work, WorkVersion, User, LoginMethod, AccountStatus, WorkType, WorkStatus } from '../types'
+import { TYPE_CONFIG, ROLE_CONFIG, ROLE_PERMISSIONS, hasRole as checkRole, ALL_ROLES } from '../types'
+import type { Permission, UserRole, Work, WorkVersion, User, LoginMethod, AccountStatus, WorkType, WorkStatus } from '../types'
 import { TypeTag, VersionStatusBadge, Avatar, WorkStatusBadge } from '../components/Tags'
-import { PERMISSION_MATRIX, BASIC_PERMS, LOG_MODULES, LOG_ACTIONS } from '../data/mockData'
-import type { PermRow } from '../data/mockData'
+import { LOG_MODULES, LOG_ACTIONS } from '../data/mockData'
+import { nowDate, nowDateTime, formatDateTime } from '../lib/datetime'
 
 // v1.2：系统分组侧边栏（移除举报处理）
 // v1.5：内容管理组新增"作品管理"入口，排在作品审核之前；系统组新增"操作日志"入口
@@ -96,74 +96,121 @@ function PermCell({
   )
 }
 
-// v1.3：权限配置矩阵组件（可编辑 + 持久化到 localStorage + 重置默认）
-const PERM_STORAGE_KEY = 'aic_perm_matrix_v1'
 type PermValue = 'yes' | 'own' | 'no'
+
+const PERMISSION_DEFINITIONS: Array<{
+  permission: Permission
+  group: string
+  label: string
+  own?: boolean
+  desc: string
+}> = [
+  { permission: 'work:read', group: '作品大厅', label: '浏览已发布作品', desc: '查看作品大厅中的已发布内容' },
+  { permission: 'work:create', group: '作品发布', label: '创建作品 / 保存草稿', desc: '创建作品并保存草稿版本' },
+  { permission: 'work:submit', group: '作品发布', label: '提交版本审核', desc: '提交、撤回及修改自己的版本' },
+  { permission: 'work:editOwn', group: '作品发布', label: '编辑自己的作品', own: true, desc: '仅限本人创建的作品' },
+  { permission: 'work:deleteOwn', group: '作品发布', label: '删除自己的作品', own: true, desc: '仅限本人创建的作品' },
+  { permission: 'work:offlineOwn', group: '作品发布', label: '下架自己的作品 / 确认候选版本', own: true, desc: '仅限本人创建的作品' },
+  { permission: 'review:view', group: '审核管理', label: '查看审核队列', desc: '查看待审核版本及审核记录' },
+  { permission: 'review:approve', group: '审核管理', label: '审核通过版本', desc: '批准待审核版本' },
+  { permission: 'review:reject', group: '审核管理', label: '驳回版本', desc: '驳回待审核版本并填写原因' },
+  { permission: 'review:forceOffline', group: '审核管理', label: '强制下架违规作品', desc: '内容治理权限' },
+  { permission: 'admin:workRead', group: '后台管理', label: '查看全部状态作品', desc: '查看草稿、待审、已下架及已删除作品' },
+  { permission: 'admin:workManage', group: '后台管理', label: '管理任意作品', desc: '上架、下架、编辑或删除任意作品' },
+  { permission: 'admin:domain', group: '后台管理', label: '业务领域管理', desc: '新增、修改和删除业务领域' },
+  { permission: 'admin:tag', group: '后台管理', label: '标签管理', desc: '新增和删除标签' },
+  { permission: 'admin:user', group: '后台管理', label: '用户管理 / 角色查看', desc: '查看用户及配置账号' },
+  { permission: 'admin:recommend', group: '后台管理', label: '运营推荐管理', desc: '设置和取消推荐作品' },
+  { permission: 'admin:stats', group: '后台管理', label: '数据统计查看', desc: '查看平台统计数据' },
+  { permission: 'admin:role', group: '后台管理', label: '权限配置 / 角色分配', desc: '配置角色权限及分配用户角色' },
+]
+
+function defaultPermissionMatrix(): Record<UserRole, Permission[]> {
+  return Object.fromEntries(
+    ROLE_COLS.map((role) => [role, [...ROLE_PERMISSIONS[role]]])
+  ) as Record<UserRole, Permission[]>
+}
 
 function PermissionMatrix({
   canEdit,
   addToast,
+  refreshPermissions,
 }: {
   canEdit: boolean
   addToast: (type: 'success' | 'error' | 'info', msg: string) => void
+  refreshPermissions: () => Promise<void>
 }) {
-  // 从 localStorage 读取自定义权限矩阵，没有则用默认
-  const [matrix, setMatrix] = useState<PermRow[]>(() => {
-    try {
-      const stored = localStorage.getItem(PERM_STORAGE_KEY)
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        // 简单校验：行数一致则采用
-        if (Array.isArray(parsed) && parsed.length === PERMISSION_MATRIX.length) {
-          return parsed
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return PERMISSION_MATRIX.map((r) => ({ ...r, cells: { ...r.cells } }))
-  })
+  const [matrix, setMatrix] = useState<Record<UserRole, Permission[]>>(defaultPermissionMatrix)
   const [dirty, setDirty] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
 
-  const permGroups = matrix.reduce<Record<string, PermRow[]>>((acc, row) => {
+  const permGroups = PERMISSION_DEFINITIONS.reduce<Record<string, typeof PERMISSION_DEFINITIONS>>((acc, row) => {
     if (!acc[row.group]) acc[row.group] = []
     acc[row.group].push(row)
     return acc
   }, {})
 
-  // 切换单元格权限值
-  const handleCellChange = (rowIdx: number, role: UserRole, next: PermValue) => {
-    setMatrix((prev) => prev.map((row, i) => (i === rowIdx ? { ...row, cells: { ...row.cells, [role]: next } } : row)))
+  useEffect(() => {
+    if (!canEdit) return
+    let active = true
+    setLoading(true)
+    getPermissionMatrix()
+      .then((data) => {
+        if (!active) return
+        setMatrix(data)
+        setDirty(false)
+      })
+      .catch((err: Error) => {
+        if (active) addToast('error', err.message || '权限配置加载失败')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [canEdit, addToast])
+
+  const handleCellChange = (permission: Permission, role: UserRole, next: PermValue) => {
+    if (role === 'super_admin') return
+    setMatrix((prev) => ({
+      ...prev,
+      [role]: next === 'no'
+        ? prev[role].filter((item) => item !== permission)
+        : Array.from(new Set([...prev[role], permission])),
+    }))
     setDirty(true)
   }
 
-  // 保存到 localStorage
-  const handleSave = () => {
+  const handleSave = async () => {
+    setSaving(true)
     try {
-      localStorage.setItem(PERM_STORAGE_KEY, JSON.stringify(matrix))
+      await Promise.all(
+        ROLE_COLS
+          .filter((role): role is Exclude<UserRole, 'super_admin'> => role !== 'super_admin')
+          .map((role) => updatePermissionMatrix(role, matrix[role]))
+      )
+      await refreshPermissions()
       setDirty(false)
-      addToast('success', '权限矩阵已保存，将在下次登录或刷新后生效')
-    } catch {
-      addToast('error', '保存失败，请重试')
+      addToast('success', '权限配置已保存到数据库并立即生效')
+    } catch (err: any) {
+      addToast('error', err.message || '保存失败，请重试')
+    } finally {
+      setSaving(false)
     }
   }
 
-  // 重置为默认
   const handleReset = () => {
-    setMatrix(PERMISSION_MATRIX.map((r) => ({ ...r, cells: { ...r.cells } })))
+    setMatrix(defaultPermissionMatrix())
     setDirty(true)
     addToast('info', '已重置为默认权限矩阵，点击"保存修改"后生效')
   }
 
-  // 整列设置（按角色批量设置某个权限值）
   const handleSetColumn = (role: UserRole, value: PermValue) => {
-    setMatrix((prev) =>
-      prev.map((row) => {
-        // 基础权限不可取消
-        if (BASIC_PERMS.includes(row.op) && value !== 'yes') return row
-        return { ...row, cells: { ...row.cells, [role]: value } }
-      })
-    )
+    if (role === 'super_admin') return
+    setMatrix((prev) => ({
+      ...prev,
+      [role]: value === 'no' ? [] : PERMISSION_DEFINITIONS.map((row) => row.permission),
+    }))
     setDirty(true)
   }
 
@@ -177,13 +224,17 @@ function PermissionMatrix({
     )
   }
 
+  if (loading) {
+    return <div className="rounded-xl border bg-card p-8 text-center text-sm text-muted-foreground">正在从服务端加载权限配置…</div>
+  }
+
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h2 className="text-base font-bold mb-1">权限配置矩阵</h2>
           <p className="text-xs text-muted-foreground">
-            点击单元格切换权限状态：无权限 → 有权限 → 仅自己 → 无权限。基础权限（标记"基础"）所有角色默认拥有，不可取消。
+            权限配置直接读取并写入服务端数据库；“仅自己”由对应权限码的资源归属规则决定。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -201,11 +252,11 @@ function PermissionMatrix({
           </button>
           <button
             onClick={handleSave}
-            disabled={!dirty}
+            disabled={!dirty || saving}
             className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
           >
-            <Save size={13} /> 保存修改
+            <Save size={13} /> {saving ? '保存中…' : '保存修改'}
           </button>
         </div>
       </div>
@@ -227,12 +278,14 @@ function PermissionMatrix({
               <div className="flex items-center justify-center gap-1">
                 <button
                   onClick={() => handleSetColumn(r, 'yes')}
+                  disabled={r === 'super_admin'}
                   className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
                   style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}
                   title="整列设为有权限"
                 >全有</button>
                 <button
                   onClick={() => handleSetColumn(r, 'no')}
+                  disabled={r === 'super_admin'}
                   className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
                   style={{ backgroundColor: 'var(--aic-surface-elevated)', color: 'var(--aic-muted-foreground)' }}
                   title="整列清空（基础权限除外）"
@@ -259,11 +312,8 @@ function PermissionMatrix({
             <tbody>
               {Object.entries(permGroups).map(([group, rows]) => (
                 rows.map((row) => {
-                  // 通过 op 在原矩阵中的索引来定位（保证状态可更新）
-                  const rowIdx = matrix.findIndex((m) => m.op === row.op)
-                  const isBasic = BASIC_PERMS.includes(row.op)
                   return (
-                    <tr key={`${group}-${row.op}`} className="border-b last:border-0" style={{ borderColor: 'var(--aic-border-solid)' }}>
+                    <tr key={`${group}-${row.permission}`} className="border-b last:border-0" style={{ borderColor: 'var(--aic-border-solid)' }}>
                       {rows.indexOf(row) === 0 && (
                         <td className="p-3 align-top font-semibold text-xs whitespace-nowrap" rowSpan={rows.length} style={{ backgroundColor: 'var(--aic-surface-elevated)', color: 'var(--aic-primary)' }}>
                           {group}
@@ -271,19 +321,21 @@ function PermissionMatrix({
                       )}
                       <td className="p-3">
                         <div className="flex items-center gap-1.5">
-                          <span>{row.op}</span>
-                          {isBasic && (
-                            <span className="text-[10px] px-1 py-0.5 rounded" style={{ backgroundColor: 'var(--aic-violet-light)', color: 'var(--aic-gradient-violet)' }} title="基础权限所有角色默认拥有，不可取消">基础</span>
-                          )}
+                          <span>{row.label}</span>
+                          <code className="text-[10px] text-muted-foreground">{row.permission}</code>
                         </div>
                       </td>
                       {ROLE_COLS.map((r) => (
                         <td key={r} className="p-3 text-center">
                           <div className="flex justify-center">
                             <PermCell
-                              value={row.cells[r]}
-                              editable={!isBasic}
-                              onChange={(next) => handleCellChange(rowIdx, r, next)}
+                              value={matrix[r]?.includes(row.permission) ? (row.own ? 'own' : 'yes') : 'no'}
+                              editable={r !== 'super_admin'}
+                              onChange={(next) => handleCellChange(
+                                row.permission,
+                                r,
+                                row.own ? (next === 'yes' ? 'own' : next) : (next === 'own' ? 'no' : next)
+                              )}
                             />
                           </div>
                         </td>
@@ -301,8 +353,8 @@ function PermissionMatrix({
       <div className="rounded-lg p-3 flex items-start gap-2 text-xs" style={{ backgroundColor: 'var(--state-info-bg)', color: 'var(--state-info)' }}>
         <Info size={14} className="mt-0.5 flex-shrink-0" />
         <span>
-          超级管理员可点击单元格调整角色权限。基础权限（标记"基础"）所有角色默认拥有，无法取消。
-          修改后请点击"保存修改"，配置将持久化到本地。后端服务已提供 <code className="px-1 rounded" style={{ backgroundColor: 'var(--aic-surface-elevated)' }}>PUT /api/admin/permission-matrix</code> 接口，正式环境可同步至服务端。
+          超级管理员可调整普通用户、创作者、审核管理员和运营管理员的权限；超级管理员权限为系统保护项，不允许修改。
+          保存后配置将写入数据库，并由后端鉴权中间件立即读取执行。
         </span>
       </div>
     </div>
@@ -347,7 +399,7 @@ function DomainManagement({
       addToast('success', `业务领域「${newName.trim()}」已添加`)
       setNewName('')
     } else {
-      addToast('error', '该业务领域已存在')
+      return
     }
   }
 
@@ -366,9 +418,13 @@ function DomainManagement({
       addToast('error', '该业务领域已存在')
       return
     }
-    await renameDomain(editing, editName.trim())
-    addToast('success', '业务领域已重命名')
-    setEditing(null)
+    try {
+      await renameDomain(editing, editName.trim())
+      addToast('success', '业务领域已重命名')
+      setEditing(null)
+    } catch {
+      // 具体原因由状态层展示，保留编辑状态方便用户修正。
+    }
   }
 
   const handleDelete = async (name: string) => {
@@ -381,7 +437,7 @@ function DomainManagement({
     if (ok) {
       addToast('success', `业务领域「${name}」已删除`)
     } else {
-      addToast('error', '删除失败，该业务领域下仍有作品')
+      return
     }
   }
 
@@ -539,15 +595,19 @@ function TagManagement({
       addToast('success', `标签「${newName.trim()}」已添加`)
       setNewName('')
     } else {
-      addToast('error', '该标签已存在')
+      return
     }
   }
 
   const handleDelete = async (tag: string) => {
     const count = works.filter((w) => w.tags.includes(tag) && w.status !== 'deleted').length
-    await deleteTag(tag)
-    setConfirmDelete(null)
-    addToast('success', `标签「${tag}」已删除${count > 0 ? `，已从 ${count} 个作品中移除` : ''}`)
+    try {
+      await deleteTag(tag)
+      setConfirmDelete(null)
+      addToast('success', `标签「${tag}」已删除${count > 0 ? `，已从 ${count} 个作品中移除` : ''}`)
+    } catch {
+      // 具体原因由状态层展示。
+    }
   }
 
   return (
@@ -637,7 +697,7 @@ function TagManagement({
 }
 
 export default function Admin() {
-  const { works, users, toggleRecommend, currentUser, addToast, approveVersion, rejectVersion, domains, tags, addDomain, renameDomain, deleteDomain, addTag, deleteTag } = useApp()
+  const { works, users, toggleRecommend, currentUser, addToast, approveVersion, rejectVersion, domains, tags, addDomain, renameDomain, deleteDomain, addTag, deleteTag, hasPermission, refreshPermissions } = useApp()
   const [activeNav, setActiveNav] = useState<NavId>('review')
 
   // v1.9：审核队列与统计从后端 API 拉取，替代直接从 works 过滤
@@ -654,13 +714,17 @@ export default function Admin() {
 
   // v1.7：基于多角色权限并集判断
   const userRoles = currentUser.roles || []
-  const canConfigPerm = checkPerm(userRoles, 'admin:role')
+  const canConfigPerm = hasPermission('admin:role')
   // v1.3：作品审核需要审核管理员或超级管理员（运营管理员不再有审核权限）
-  const canReview = checkPerm(userRoles, 'review:view')
+  const canReview = hasPermission('review:view')
   // v1.2：用户管理需要运营管理员及以上
-  const canManageUser = checkPerm(userRoles, 'admin:user')
-  // v1.5：作品管理需要审核管理员或运营管理员及以上
-  const canManageWorks = checkRole(userRoles, 'reviewer', 'operator', 'super_admin')
+  const canManageUser = hasPermission('admin:user')
+  const canReadWorks = hasPermission('admin:workRead')
+  const canManageWorks = hasPermission('admin:workManage')
+  const canManageDomains = hasPermission('admin:domain')
+  const canManageTags = hasPermission('admin:tag')
+  const canRecommend = hasPermission('admin:recommend')
+  const canViewStats = hasPermission('admin:stats')
   // v1.5：操作日志——查看自身记录（审核管理员及以上）；查看全部 + 导出（仅超级管理员）
   const canViewOpLog = checkRole(userRoles, 'reviewer', 'operator', 'super_admin')
   const canViewAllOpLog = checkRole(userRoles, 'super_admin')
@@ -696,8 +760,9 @@ export default function Admin() {
       addToast('error', '推荐位最多 5 个，请先取消其他推荐')
       return
     }
-    await toggleRecommend(id)
-    addToast('success', works.find((w) => w.id === id)?.recommended ? `已取消「${title}」推荐` : `已推荐「${title}」`)
+    if (await toggleRecommend(id)) {
+      addToast('success', works.find((w) => w.id === id)?.recommended ? `已取消「${title}」推荐` : `已推荐「${title}」`)
+    }
   }
 
   return (
@@ -720,7 +785,15 @@ export default function Admin() {
                   {group.items.map((item) => {
                     const Icon = item.icon
                     const isActive = activeNav === item.id
-                    const locked = (item.id === 'permission' && !canConfigPerm) || (item.id === 'review' && !canReview) || (item.id === 'user' && !canManageUser) || (item.id === 'works' && !canManageWorks) || (item.id === 'log' && !canViewOpLog)
+                    const locked = (item.id === 'permission' && !canConfigPerm)
+                      || (item.id === 'review' && !canReview)
+                      || (item.id === 'user' && !canManageUser)
+                      || (item.id === 'works' && !canReadWorks)
+                      || (item.id === 'category' && !canManageDomains)
+                      || (item.id === 'tag' && !canManageTags)
+                      || (item.id === 'recommend' && !canRecommend)
+                      || (item.id === 'stats' && !canViewStats)
+                      || (item.id === 'log' && !canViewOpLog)
                     return (
                       <button
                         key={item.id}
@@ -749,7 +822,7 @@ export default function Admin() {
         <div className="flex-1 min-w-0">
           {/* v1.5：作品管理 - 统一的作品列表入口 */}
           {activeNav === 'works' && (
-            <WorkManagement canManageWorks={canManageWorks} />
+            <WorkManagement canReadWorks={canReadWorks} canManageWorks={canManageWorks} />
           )}
 
           {/* 作品审核 - 内嵌审核管理 */}
@@ -770,6 +843,7 @@ export default function Admin() {
             <PermissionMatrix
               canEdit={canConfigPerm}
               addToast={addToast}
+              refreshPermissions={refreshPermissions}
             />
           )}
 
@@ -882,7 +956,7 @@ export default function Admin() {
             <div className="space-y-5 animate-fade-in">
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-bold">数据统计概览</h2>
-                <span className="text-xs text-muted-foreground">数据更新时间：{new Date().toISOString().slice(0, 16).replace('T', ' ')}</span>
+                <span className="text-xs text-muted-foreground">数据更新时间：{nowDateTime()}</span>
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -989,6 +1063,7 @@ function ReviewPanel({
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [showReject, setShowReject] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null)
 
   const selected = reviewItems.find((item) => `${item.work.id}-${item.version.version}` === selectedKey)
     || reviewItems[0]
@@ -999,10 +1074,7 @@ function ReviewPanel({
     if (!selected) return
     const { work, version, isFirstVersion } = selected
     const ok = await approveVersion(work.id, version.version)
-    if (!ok) {
-      addToast('error', '审核通过失败，请重试')
-      return
-    }
+    if (!ok) return
     const msg = isFirstVersion
       ? `「${work.title}」${version.version} 已审核通过，作品从未发布变为已发布`
       : `「${work.title}」${version.version} 已审核通过，已替换为线上版本`
@@ -1022,16 +1094,26 @@ function ReviewPanel({
     }
     const { work, version } = selected
     const ok = await rejectVersion(work.id, version.version, rejectReason.trim())
-    if (!ok) {
-      addToast('error', '驳回失败，请重试')
-      return
-    }
+    if (!ok) return
     addToast('success', `「${work.title}」${version.version} 已驳回，修改意见已发送给作者。作品线上版本不受影响`)
     const remaining = reviewItems.filter((item) => !(item.work.id === work.id && item.version.version === version.version))
     setSelectedKey(remaining[0] ? `${remaining[0].work.id}-${remaining[0].version.version}` : null)
     setShowReject(false)
     setRejectReason('')
     refreshReview()
+  }
+
+  const handleReviewAttachmentDownload = async (attachment: ReviewItem['work']['attachments'][number]) => {
+    if (!attachment.url || downloadingAttachmentId) return
+    setDownloadingAttachmentId(attachment.id)
+    try {
+      await downloadAttachmentFile(attachment.url, attachment.name)
+      addToast('success', `正在下载：${attachment.name}`)
+    } catch (error) {
+      addToast('error', error instanceof Error ? error.message : '附件下载失败，请重试')
+    } finally {
+      setDownloadingAttachmentId(null)
+    }
   }
 
   if (!canReview) {
@@ -1186,13 +1268,16 @@ function ReviewPanel({
             <div className="text-xs font-semibold mb-1">附件</div>
             <div className="flex flex-wrap gap-2">
               {selected.work.attachments.map((a) => (
-                <span
+                <button
+                  type="button"
                   key={a.id}
+                  onClick={() => handleReviewAttachmentDownload(a)}
+                  disabled={!a.url || downloadingAttachmentId !== null}
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium"
                   style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}
                 >
-                  <FileText size={12} /> {a.name} · {a.size}
-                </span>
+                  <Download size={12} /> {a.name} · {a.size}{downloadingAttachmentId === a.id ? '（下载中）' : ''}
+                </button>
               ))}
               {selected.work.attachments.length === 0 && (
                 <span className="text-xs text-muted-foreground">无附件</span>
@@ -1293,6 +1378,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
   }>({ roles: ['user'], loginMethod: 'wecom', loginAccount: '', password: '', accountStatus: 'active' })
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [resetResult, setResetResult] = useState<{ userName: string; password: string } | null>(null)
 
   // v1.9：组件挂载时从后端拉取最新用户列表（含真实角色数据），替代 localStorage 缓存
   useEffect(() => {
@@ -1403,7 +1489,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
       return
     }
     const temporaryPassword = await resetUserPassword(user.id)
-    addToast(temporaryPassword ? 'success' : 'error', temporaryPassword ? `临时密码：${temporaryPassword}（请安全告知用户）` : '重置失败，请重试')
+    if (temporaryPassword) setResetResult({ userName: user.name, password: temporaryPassword })
   }
 
   // 登录方式标签
@@ -1508,7 +1594,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
                 // v1.9：使用后端返回的真实数据替代 mockData 的 USER_ACTIVITY
                 const worksCount = u.worksCount ?? 0
                 const lastActive = u.lastLoginAt
-                  ? new Date(u.lastLoginAt).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+                  ? formatDateTime(u.lastLoginAt)
                   : '—'
                 return (
                   <tr key={u.id} className="border-b last:border-0" style={{ borderColor: 'var(--aic-border-solid)' }}>
@@ -1591,6 +1677,26 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
           管理员可在"编辑用户"弹窗中设置账号和初始密码。密码需满足复杂度要求（6-32 字符，含字母和数字），重置后密码以默认密码形式下发。
         </span>
       </div>
+
+      {resetResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setResetResult(null)}>
+          <div className="w-full max-w-[420px] rounded-xl bg-white p-6 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-base font-bold">密码重置成功</h3>
+              <button type="button" onClick={() => setResetResult(null)} className="rounded p-1 hover:bg-muted"><X size={18} /></button>
+            </div>
+            <p className="mb-4 text-sm text-muted-foreground">请将以下临时密码安全告知“{resetResult.userName}”，关闭后将不再显示。</p>
+            <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-3" style={{ borderColor: 'var(--aic-border-solid)' }}>
+              <code className="flex-1 select-all text-base font-bold tracking-wider">{resetResult.password}</code>
+              <button type="button" className="rounded-md border px-3 py-1.5 text-xs" style={{ borderColor: 'var(--aic-border-solid)' }} onClick={async () => {
+                await navigator.clipboard.writeText(resetResult.password)
+                addToast('success', '临时密码已复制')
+              }}>复制</button>
+            </div>
+            <button type="button" onClick={() => setResetResult(null)} className="mt-5 w-full rounded-md py-2 text-sm font-medium text-white" style={{ background: 'var(--aic-primary)' }}>我已妥善保存</button>
+          </div>
+        </div>
+      )}
 
       {/* v1.4：编辑用户弹窗 */}
       {editingUser && (
@@ -1783,7 +1889,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
 }
 
 // ============ 作品管理面板（v1.5：统一的作品列表入口） ============
-function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
+function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolean; canManageWorks: boolean }) {
   const navigate = useNavigate()
   const {
     works, addToast,
@@ -1845,7 +1951,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
-  if (!canManageWorks) {
+  if (!canReadWorks) {
     return (
       <div className="rounded-xl border bg-card p-8 shadow-sm text-center animate-fade-in" style={{ borderColor: 'var(--aic-border-solid)' }}>
         <Package size={40} className="mx-auto mb-3 text-muted-foreground opacity-40" />
@@ -1857,40 +1963,46 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
 
   // 行操作：下架
   const handleOffline = async (work: Work) => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (work.status !== 'published') {
       addToast('info', '仅已发布作品可下架')
       return
     }
-    if (!window.confirm(`确认下架《${work.title}》？下架后作品从大厅移除，数据保留。`)) return
-    const ok = await offlineWork(work.id)
-    addToast(ok ? 'success' : 'error', ok ? `已下架《${work.title}》` : '下架失败，请重试')
+    const reason = window.prompt(`请输入强制下架《${work.title}》的原因（至少 5 个字符）`)
+    if (reason === null) return
+    if (reason.trim().length < 5) { addToast('error', '强制下架原因至少 5 个字符'); return }
+    const ok = await offlineWork(work.id, reason.trim())
+    if (ok) addToast('success', `已下架《${work.title}》`)
   }
 
   // 行操作：上架
   const handleOnline = async (work: Work) => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (work.status !== 'offline') {
       addToast('info', '仅已下架作品可上架')
       return
     }
     if (!window.confirm(`确认上架《${work.title}》？上架后作品重新在大厅展示。`)) return
     const ok = await onlineWork(work.id)
-    addToast(ok ? 'success' : 'error', ok ? `已上架《${work.title}》` : '上架失败，请重试')
+    if (ok) addToast('success', `已上架《${work.title}》`)
   }
 
   // 行操作：删除（软删除）
   const handleDelete = async (work: Work) => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (work.status === 'deleted') {
       addToast('info', '该作品已删除，不可重复操作')
       return
     }
     if (!window.confirm(`确认删除《${work.title}》？删除后不可恢复（数据归档保留）。`)) return
     const count = await batchDeleteWorks([work.id])
-    addToast(count > 0 ? 'success' : 'error', count > 0 ? `已删除《${work.title}》` : '删除失败，请重试')
+    if (count > 0) addToast('success', `已删除《${work.title}》`)
     if (count > 0) setSelectedIds((prev) => prev.filter((id) => id !== work.id))
   }
 
   // 行操作：编辑（生成新版本走审核流程）— 直接进入作品编辑页
   const handleEdit = (work: Work) => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (work.status === 'deleted') {
       addToast('error', '已删除作品不可编辑')
       return
@@ -1900,24 +2012,29 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
 
   // 批量操作
   const handleBatchOffline = async () => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (selectedIds.length === 0) { addToast('error', '请先选择作品'); return }
-    if (!window.confirm(`确认批量下架选中的 ${selectedIds.length} 个作品？`)) return
-    const count = await batchOfflineWorks(selectedIds)
-    addToast(count > 0 ? 'success' : 'info', count > 0 ? `已下架 ${count} 个作品` : '选中的作品均不在已发布状态')
+    const reason = window.prompt(`请输入批量强制下架 ${selectedIds.length} 个作品的原因（至少 5 个字符）`)
+    if (reason === null) return
+    if (reason.trim().length < 5) { addToast('error', '强制下架原因至少 5 个字符'); return }
+    const count = await batchOfflineWorks(selectedIds, reason.trim())
+    if (count > 0) addToast('success', `已下架 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
   }
   const handleBatchOnline = async () => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (selectedIds.length === 0) { addToast('error', '请先选择作品'); return }
     if (!window.confirm(`确认批量上架选中的 ${selectedIds.length} 个作品？`)) return
     const count = await batchOnlineWorks(selectedIds)
-    addToast(count > 0 ? 'success' : 'info', count > 0 ? `已上架 ${count} 个作品` : '选中的作品均不在已下架状态')
+    if (count > 0) addToast('success', `已上架 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
   }
   const handleBatchDelete = async () => {
+    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
     if (selectedIds.length === 0) { addToast('error', '请先选择作品'); return }
     if (!window.confirm(`确认批量删除选中的 ${selectedIds.length} 个作品？删除后不可恢复。`)) return
     const count = await batchDeleteWorks(selectedIds)
-    addToast(count > 0 ? 'success' : 'info', count > 0 ? `已删除 ${count} 个作品` : '选中的作品均已删除')
+    if (count > 0) addToast('success', `已删除 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
   }
 
@@ -1976,7 +2093,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索作品名称、作者..."
+              placeholder="搜索作品名称、作者、关键词..."
               className="h-10 w-full rounded-md border pl-9 pr-3 text-sm outline-none focus:ring-2"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
@@ -2021,7 +2138,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
           <span className="text-xs text-muted-foreground">|</span>
           <button
             onClick={handleBatchOffline}
-            disabled={selectedIds.length === 0}
+            disabled={!canManageWorks || selectedIds.length === 0}
             className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ borderColor: 'var(--state-warning)', color: 'var(--state-warning)' }}
           >
@@ -2029,7 +2146,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
           </button>
           <button
             onClick={handleBatchOnline}
-            disabled={selectedIds.length === 0}
+            disabled={!canManageWorks || selectedIds.length === 0}
             className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ borderColor: 'var(--state-success)', color: 'var(--state-success)' }}
           >
@@ -2037,7 +2154,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
           </button>
           <button
             onClick={handleBatchDelete}
-            disabled={selectedIds.length === 0}
+            disabled={!canManageWorks || selectedIds.length === 0}
             className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ borderColor: 'var(--state-danger)', color: 'var(--state-danger)' }}
           >
@@ -2114,6 +2231,7 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
                         {w.status === 'published' && (
                           <button
                             onClick={() => handleOffline(w)}
+                            disabled={!canManageWorks}
                             className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80"
                             style={{ borderColor: 'var(--state-warning)', color: 'var(--state-warning)' }}
                           >
@@ -2123,28 +2241,33 @@ function WorkManagement({ canManageWorks }: { canManageWorks: boolean }) {
                         {w.status === 'offline' && (
                           <button
                             onClick={() => handleOnline(w)}
+                            disabled={!canManageWorks}
                             className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium text-white transition hover:opacity-90"
                             style={{ backgroundColor: 'var(--state-success)' }}
                           >
                             <ArrowUpCircle size={11} /> 上架
                           </button>
                         )}
-                        <button
-                          onClick={() => handleEdit(w)}
-                          disabled={isDeleted}
-                          className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:border-primary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ borderColor: 'var(--aic-border-solid)' }}
-                        >
-                          <Pencil size={11} /> 编辑
-                        </button>
-                        <button
-                          onClick={() => handleDelete(w)}
-                          disabled={isDeleted}
-                          className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
-                          style={{ borderColor: 'var(--state-danger)', color: 'var(--state-danger)' }}
-                        >
-                          <Trash2 size={11} /> 删除
-                        </button>
+                        {!isDeleted && (
+                          <>
+                            <button
+                              onClick={() => handleEdit(w)}
+                              disabled={!canManageWorks}
+                              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:border-primary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+                              style={{ borderColor: 'var(--aic-border-solid)' }}
+                            >
+                              <Pencil size={11} /> 编辑
+                            </button>
+                            <button
+                              onClick={() => handleDelete(w)}
+                              disabled={!canManageWorks}
+                              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 disabled:opacity-40 disabled:cursor-not-allowed"
+                              style={{ borderColor: 'var(--state-danger)', color: 'var(--state-danger)' }}
+                            >
+                              <Trash2 size={11} /> 删除
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -2355,7 +2478,7 @@ function OperationLogPanel({
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `操作日志_${new Date().toISOString().slice(0, 10)}.csv`
+      a.download = `操作日志_${nowDate()}.csv`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)

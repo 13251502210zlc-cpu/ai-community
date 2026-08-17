@@ -19,13 +19,18 @@ const TABS = [
 export default function Detail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { works, currentUser, toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, addToast } = useApp()
+  const { works, currentUser, refreshWork, toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, addToast } = useApp()
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('intro')
   const [comment, setComment] = useState('')
   const [viewCounted, setViewCounted] = useState(false)
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null)
 
   const work = works.find((w) => w.id === id)
+
+  // 每次进入或切换详情页都从服务端刷新，确保点赞/收藏高亮不依赖列表或管理端缓存。
+  useEffect(() => {
+    if (id) void refreshWork(id)
+  }, [id, refreshWork])
 
   useEffect(() => {
     if (work && !viewCounted) {
@@ -45,20 +50,22 @@ export default function Detail() {
 
   const cfg = TYPE_CONFIG[work.type]
   const isAuthor = work.authorId === currentUser.id
+  const publishedVersions = work.versions.filter((version) => version.status === 'passed')
 
   const handleLike = async () => {
-    await toggleLike(work.id)
-    addToast('success', work.likedByMe ? '已取消点赞' : '点赞成功')
+    if (await toggleLike(work.id)) {
+      addToast('success', work.likedByMe ? '已取消点赞' : '点赞成功')
+    }
   }
 
   const handleFav = async () => {
-    await toggleFavorite(work.id)
-    addToast('success', work.favoritedByMe ? '已取消收藏' : '已加入收藏')
+    if (await toggleFavorite(work.id)) {
+      addToast('success', work.favoritedByMe ? '已取消收藏' : '已加入收藏')
+    }
   }
 
   const handleDownload = async () => {
-    await incrementDownload(work.id)
-    addToast('success', '开始下载附件')
+    if (await incrementDownload(work.id)) addToast('success', '开始下载附件')
   }
 
   const handleAttachmentDownload = async (file: typeof work.attachments[number]) => {
@@ -66,7 +73,7 @@ export default function Detail() {
     setDownloadingAttachmentId(file.id)
     try {
       await downloadAttachmentFile(file.url, file.name)
-      await incrementDownload(work.id)
+      if (!(await incrementDownload(work.id))) return
       addToast('success', `正在下载：${file.name}`)
     } catch (err) {
       addToast('error', err instanceof Error ? err.message : '附件下载失败，请重试')
@@ -112,9 +119,16 @@ export default function Detail() {
     addToast('info', `${action}：该作品暂无可下载的资源`)
   }
 
-  const handleShare = () => {
-    navigator.clipboard?.writeText(window.location.href).catch(() => {})
-    addToast('success', '分享链接已复制')
+  const handleShare = async () => {
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('当前浏览器不支持自动复制')
+      }
+      await navigator.clipboard.writeText(window.location.href)
+      addToast('success', '分享链接已复制')
+    } catch (err) {
+      addToast('error', err instanceof Error ? err.message : '复制链接失败，请手动复制地址栏链接')
+    }
   }
 
   const handleComment = async () => {
@@ -122,11 +136,12 @@ export default function Detail() {
       addToast('error', '评论内容至少 5 个字符')
       return
     }
-    const ok = await addComment(work.id, comment.trim())
-    if (!ok) {
-      addToast('error', '评价发表失败')
+    if (comment.trim().length > 500) {
+      addToast('error', '评论内容不能超过 500 个字符')
       return
     }
+    const ok = await addComment(work.id, comment.trim())
+    if (!ok) return
     setComment('')
     addToast('success', '评价已发表')
   }
@@ -147,7 +162,7 @@ export default function Detail() {
           <img
             src={assetUrl(work.coverUrl)}
             alt={work.title}
-            className="h-[100px] w-[100px] flex-shrink-0 rounded-xl object-cover"
+            className="h-[100px] w-[100px] flex-shrink-0 rounded-xl bg-muted object-contain"
           />
         ) : (
           <div
@@ -329,7 +344,7 @@ export default function Detail() {
                 </tr>
               </thead>
               <tbody>
-                {work.versions.map((v) => (
+                {publishedVersions.map((v) => (
                   <tr key={v.version} className="border-b" style={{ borderColor: 'var(--aic-border-solid)' }}>
                     <td className="p-3">
                       <span
@@ -346,6 +361,9 @@ export default function Detail() {
                     <td className="p-3 text-muted-foreground whitespace-nowrap">{v.date}</td>
                   </tr>
                 ))}
+                {publishedVersions.length === 0 && (
+                  <tr><td colSpan={3} className="p-8 text-center text-sm text-muted-foreground">暂无已发布版本</td></tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -398,13 +416,15 @@ export default function Detail() {
       <div className="border-t pt-5" style={{ borderColor: 'var(--aic-border-solid)' }}>
         <h2 className="text-base font-bold mb-4">用户评价 ({work.comments.length})</h2>
         <div className="flex gap-2 mb-4">
-          <input
-            type="text"
+          <textarea
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleComment()}
-            placeholder="写下你的评价..."
-            className="flex-1 h-10 rounded-md border px-3 text-sm outline-none focus:ring-2"
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleComment()
+            }}
+            maxLength={500}
+            placeholder="写下你的评价...（最多500字，Ctrl+Enter发表）"
+            className="flex-1 min-h-20 resize-y rounded-md border px-3 py-2 text-sm outline-none focus:ring-2"
             style={{ borderColor: 'var(--aic-border-solid)' }}
           />
           <button
@@ -424,7 +444,7 @@ export default function Detail() {
                 <span className="text-xs text-muted-foreground">· {c.department}</span>
                 <span className="text-xs text-muted-foreground ml-auto">{c.date}</span>
               </div>
-              <p className="text-sm text-muted-foreground pl-8">{c.content}</p>
+              <p className="text-sm text-muted-foreground pl-8 whitespace-pre-wrap break-words">{c.content}</p>
             </div>
           ))}
           {work.comments.length === 0 && (
