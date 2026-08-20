@@ -31,7 +31,10 @@ function pickDisplayVersion(work: Work): WorkVersion | undefined {
 
 export default function Profile() {
   const navigate = useNavigate()
-  const { works, events, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast } = useApp()
+  const { works, events, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast, hasPermission } = useApp()
+  const canCreateWork = hasPermission('work:create')
+  const canSubmitWork = hasPermission('work:submit')
+  const canEditOwnWork = hasPermission('work:editOwn')
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('works')
   const [showRejectId, setShowRejectId] = useState<string | null>(null)
 
@@ -131,13 +134,15 @@ export default function Profile() {
           <div>
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm text-muted-foreground">共 {myWorks.length} 个作品</span>
-              <Link
-                to="/publish"
-                className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
-                style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
-              >
-                <Plus size={14} /> 发布新作品
-              </Link>
+              {canCreateWork && (
+                <Link
+                  to="/publish"
+                  className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
+                >
+                  <Plus size={14} /> 发布新作品
+                </Link>
+              )}
             </div>
             <div className="overflow-x-auto rounded-xl border bg-card shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
               <table className="w-full text-sm">
@@ -160,7 +165,7 @@ export default function Profile() {
                     const hasRejected = w.versions.some((v) => v.status === 'rejected')
                     const hasDraft = w.versions.some((v) => v.status === 'draft')
                     const candidateVersion = w.versions.find((v) => v.status === 'passed' && v.candidate)
-                    const canEdit = w.status !== 'deleted' && (hasDraft || hasRejected || w.status === 'published' || w.status === 'unpublished' || w.status === 'offline')
+                    const canEdit = canEditOwnWork && w.status !== 'deleted' && (hasDraft || hasRejected || w.status === 'published' || w.status === 'unpublished' || w.status === 'offline')
                     return (
                       <Fragment key={w.id}>
                         <tr className="border-b last:border-0" style={{ borderColor: 'var(--aic-border-solid)' }}>
@@ -238,7 +243,7 @@ export default function Profile() {
                                   <Edit size={11} /> 编辑
                                 </Link>
                               )}
-                              {hasPending && displayVersion && (
+                              {canSubmitWork && w.status !== 'deleted' && hasPending && displayVersion && (
                                 <button
                                   onClick={() => handleWithdraw(w.id, displayVersion.version, w.title)}
                                   className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:bg-muted"
@@ -247,7 +252,7 @@ export default function Profile() {
                                   <Undo size={11} /> 撤回
                                 </button>
                               )}
-                              {hasRejected && displayVersion && (
+                              {w.status !== 'deleted' && hasRejected && displayVersion && (
                                 <button
                                   onClick={() => setShowRejectId(showRejectId === w.id ? null : w.id)}
                                   className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition"
@@ -270,7 +275,7 @@ export default function Profile() {
                             </div>
                           </td>
                         </tr>
-                        {showRejectId === w.id && hasRejected && (
+                        {w.status !== 'deleted' && showRejectId === w.id && hasRejected && (
                           <tr>
                             <td colSpan={7} className="p-4" style={{ backgroundColor: 'var(--state-danger-bg)' }}>
                               {w.versions.filter((v) => v.status === 'rejected').map((v) => (
@@ -278,7 +283,7 @@ export default function Profile() {
                                   <div className="font-semibold text-sm mb-1" style={{ color: 'var(--state-danger)' }}>
                                     驳回修改意见 · {v.version}
                                   </div>
-                                  <p className="text-sm text-muted-foreground mb-2">{v.rejectReason}</p>
+                                  <p className="text-sm text-muted-foreground mb-2 whitespace-pre-wrap break-all">{v.rejectReason}</p>
                                   <div className="text-xs text-muted-foreground">审核人：{v.reviewer || '审核管理员'} · {v.reviewedAt || '—'}</div>
                                   <div className="flex gap-2 mt-3">
                                     <button
@@ -289,14 +294,16 @@ export default function Profile() {
                                     >
                                       关闭
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleGoModify(w.id, v.version)}
-                                      className="inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium text-white"
-                                      style={{ backgroundColor: 'var(--aic-primary)' }}
-                                    >
-                                      <Edit size={11} /> 去修改
-                                    </button>
+                                    {canSubmitWork && canEditOwnWork && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleGoModify(w.id, v.version)}
+                                        className="inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs font-medium text-white"
+                                        style={{ backgroundColor: 'var(--aic-primary)' }}
+                                      >
+                                        <Edit size={11} /> 去修改
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               ))}
@@ -309,7 +316,7 @@ export default function Profile() {
                   {myWorks.length === 0 && (
                     <tr>
                       <td colSpan={7} className="p-8 text-center text-muted-foreground text-sm">
-                        还没有作品，<Link to="/publish" className="text-primary hover:underline">去发布第一个</Link>
+                        {canCreateWork ? <>还没有作品，<Link to="/publish" className="text-primary hover:underline">去发布第一个</Link></> : '还没有作品，当前角色无创建作品权限'}
                       </td>
                     </tr>
                   )}
@@ -385,7 +392,7 @@ export default function Profile() {
                       </div>
                     )}
                     {isRejected && e.reason && (
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--state-danger)' }}>
+                      <div className="text-xs mt-0.5 whitespace-pre-wrap break-all line-clamp-3" style={{ color: 'var(--state-danger)' }}>
                         修改意见：{e.reason}
                       </div>
                     )}

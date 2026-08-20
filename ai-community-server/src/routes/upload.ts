@@ -3,7 +3,7 @@ import multer from 'multer'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
-import { authRequired } from '../lib/auth.js'
+import { authRequired, getEffectivePermissions } from '../lib/auth.js'
 import { prisma } from '../lib/prisma.js'
 import { persistCover } from '../lib/file-storage.js'
 
@@ -40,14 +40,14 @@ const coverUpload = multer({
   },
 })
 
-// 附件上传：最大 50 MiB；multer 的上限为包含边界，恰好 50 MiB 可上传。
+// 附件上传：最大 100 MiB；multer 的上限为包含边界，恰好 100 MiB 可上传。
 const attachmentStorage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, ATTACHMENT_DIR),
   filename: (_req, file, cb) => cb(null, genFileName(file.originalname)),
 })
 const attachmentUpload = multer({
   storage: attachmentStorage,
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     // 禁止可执行脚本（安全考虑）
     const forbidden = /\.(exe|bat|cmd|sh|js|ts)$/i
@@ -119,7 +119,8 @@ router.get('/attachment/:filename', authRequired, async (req, res, next) => {
       res.status(404).json({ error: '文件不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManage = attachment.work.authorId === req.userId || (req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+    const effectivePermissions = await getEffectivePermissions(req.userRoles || [])
+    const canManage = attachment.work.authorId === req.userId || effectivePermissions.includes('admin:workManage')
     const isCurrentPublished = attachment.work.status === 'published' && !!attachment.version?.current
     if (!canManage && !isCurrentPublished) {
       res.status(404).json({ error: '文件不存在', code: 'NOT_FOUND' })

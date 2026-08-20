@@ -17,7 +17,7 @@ export default function WorkCard({ work }: { work: Work }) {
         <img
           src={assetUrl(work.coverUrl)}
           alt={work.title}
-          className="h-32 w-full bg-muted object-contain transition group-hover:scale-[1.02]"
+          className="block h-32 w-full bg-muted object-cover object-center transition group-hover:scale-[1.02]"
         />
       ) : (
         <div

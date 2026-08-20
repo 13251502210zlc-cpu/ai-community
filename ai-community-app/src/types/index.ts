@@ -65,6 +65,17 @@ export interface WorkVersion {
   baseVersionId?: string
   // v1.3：审核通过但因作品已下架或 base_version_id 过期未自动上线时标记为候选版本
   candidate?: boolean
+  // 版本内容快照：编辑草稿时必须读取这里，不能回退到当前线上 Work 数据。
+  title?: string
+  type?: WorkType
+  category?: string
+  tags?: string[]
+  intro?: string
+  usage?: string
+  businessValue?: string
+  scene?: string
+  coreAbilities?: string[]
+  coverUrl?: string
   // v2.0：版本级附件列表（编辑草稿时加载此版本自己的附件）
   attachments?: Attachment[]
 }
@@ -213,7 +224,7 @@ export const ROLE_CONFIG: Record<UserRole, { label: string; badge: string; badge
     label: '审核管理员',
     badge: '管理角色',
     badgeBg: 'rgba(245,158,11,0.12)',
-    desc: '负责内容审核与内容治理。可查看审核队列、通过/驳回版本、强制下架违规作品、查看审核相关数据统计。不自动拥有运营管理权限。',
+    desc: '负责内容审核与内容治理。可查看审核队列、通过/驳回版本、查看审核相关数据统计。不自动拥有运营管理权限。',
   },
   operator: {
     label: '运营管理员',
@@ -246,7 +257,6 @@ export type Permission =
   | 'review:view' // 查看审核队列
   | 'review:approve' // 审核通过版本
   | 'review:reject' // 驳回版本
-  | 'review:forceOffline' // 强制下架违规作品
   | 'admin:domain' // 业务领域管理
   | 'admin:tag' // 标签管理
   | 'admin:user' // 用户管理 / 角色查看
@@ -260,11 +270,11 @@ export type Permission =
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   user: ['work:read', 'work:create'],
   creator: ['work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn'],
-  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'review:forceOffline', 'admin:workRead', 'admin:workManage'],
+  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'admin:stats', 'admin:workRead', 'admin:workManage'],
   operator: ['work:read', 'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:workRead', 'admin:workManage'],
   super_admin: [
     'work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn',
-    'review:view', 'review:approve', 'review:reject', 'review:forceOffline',
+    'review:view', 'review:approve', 'review:reject',
     'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:role', 'admin:workRead', 'admin:workManage',
   ],
 }

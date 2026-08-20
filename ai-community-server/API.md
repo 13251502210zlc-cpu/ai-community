@@ -1,6 +1,16 @@
 # AI 社区平台 API 文档
 
-> 版本：v2.0 ｜ 更新日期：2026-08-10 ｜ Base URL：`/api`
+> 版本：v2.4 ｜ 更新日期：2026-08-19 ｜ Base URL：`/api`
+
+## 版本记录
+
+| 版本 | 日期 | 变更内容 |
+|---|---|---|
+| v2.4 | 2026-08-19 | 移除冗余权限 `review:forceOffline`；管理员对任意作品的上架、下架和删除统一由 `admin:workManage` 控制 |
+| v2.3 | 2026-08-18 | 明确权限矩阵只有保存后才生效；同一用户拥有多个角色时有效权限取各角色权限并集；前端操作入口同步采用服务端有效权限 |
+| v2.2 | 2026-08-18 | 超级管理员固定拥有系统全部权限且不可配置；拥有 `admin:workManage` 权限的角色可查看并下载他人作品已有附件 |
+| v2.1 | 2026-08-18 | 附件上限调整为 100MB（含边界值）；更新说明至少 20 个字符；审核驳回理由最多 200 个字符；标签名称最多 30 个字符；删除态作品禁止继续操作；上下架纳入服务端操作日志 |
+| v2.0 | 2026-08-10 | 形成当前接口文档基线 |
 
 ## 目录
 
@@ -84,7 +94,7 @@ x-user-name: 周涛
 | ------------- | ------------- | ------------------------- |
 | 普通用户        | `user`        | 浏览、互动、创建作品          |
 | 创作者          | `creator`     | 管理自己的作品及版本          |
-| 审核管理员       | `reviewer`    | 审核版本、强制下架违规作品     |
+| 审核管理员       | `reviewer`    | 审核版本、查看审核相关统计     |
 | 运营管理员       | `operator`    | 业务领域/标签/用户/推荐/统计  |
 | 超级管理员       | `super_admin` | 全部权限 + 权限配置 + 角色分配 |
 
@@ -101,7 +111,6 @@ x-user-name: 周涛
 | `review:view`        |      |         | ✓        |          | ✓           |
 | `review:approve`     |      |         | ✓        |          | ✓           |
 | `review:reject`      |      |         | ✓        |          | ✓           |
-| `review:forceOffline`|      |         | ✓        |          | ✓           |
 | `admin:domain`       |      |         |          | ✓        | ✓           |
 | `admin:tag`          |      |         |          | ✓        | ✓           |
 | `admin:user`         |      |         |          | ✓        | ✓           |
@@ -338,7 +347,7 @@ x-user-name: 周涛
 
 上传附件。**multipart/form-data**，字段名 `file`。
 
-**限制**：最大 50MB，禁止 `.exe/.bat/.cmd/.sh/.js/.ts` 等可执行脚本。
+**限制**：最大 100MB（包含 100MB 边界值），禁止 `.exe/.bat/.cmd/.sh/.js/.ts` 等可执行脚本。
 
 **响应（200）**
 
@@ -354,7 +363,13 @@ x-user-name: 周涛
 
 ---
 
-### 4.3 `DELETE /api/upload/attachment/:filename`
+### 4.3 `GET /api/upload/attachment/:filename`
+
+下载已有附件。作者、拥有 `admin:workManage` 权限的角色，以及已发布作品当前版本的访问者可以下载。
+
+---
+
+### 4.4 `DELETE /api/upload/attachment/:filename`
 
 生产网关兼容调用：`POST /api/upload/attachment/:filename/delete`，权限、参数和响应完全相同。前端默认使用该 POST 路径。
 
@@ -759,7 +774,7 @@ x-user-name: 周涛
 
 获取权限矩阵。需 `admin:role` 权限。
 
-**响应**：`ROLE_PERMISSIONS` 对象（角色 → 权限列表映射）
+**响应**：`ROLE_PERMISSIONS` 对象（角色 → 权限列表映射）。`super_admin` 始终返回系统全部权限，不读取数据库配置，也不允许通过更新接口修改。
 
 ---
 
@@ -775,7 +790,7 @@ x-user-name: 周涛
 
 ### 7.6 管理员作品管理（v1.8）
 
-允许管理员管理平台任意作品，绕过 `work:deleteOwn`/`work:offlineOwn` 的"仅自己"限制。需 `review:forceOffline` 权限。
+允许管理员管理平台任意作品，绕过 `work:deleteOwn`/`work:offlineOwn` 的"仅自己"限制。需 `admin:workManage` 权限。
 
 | 方法       | 路径                                | 说明                          | 业务规则                          |
 | ---------- | ----------------------------------- | ----------------------------- | --------------------------------- |

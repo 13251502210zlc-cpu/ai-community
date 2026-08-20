@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ImagePlus, FileUp, X, Save, Send, History, Lock, Loader2, Download } from 'lucide-react'
 import { useApp } from '../store/AppStore'
@@ -30,25 +30,36 @@ export default function Publish() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const editId = params.get('edit')
-  const { works, addWork, updateWork, submitVersionForReview, addToast, canCreateNewVersion, domains: appDomains, tags: appTags, currentUser } = useApp()
+  const { works, addWork, updateWork, submitVersionForReview, addToast, canCreateNewVersion, domains: appDomains, tags: appTags, currentUser, hasPermission, refreshWork } = useApp()
 
   const editingWork = editId ? works.find((w) => w.id === editId) : undefined
+  const editableVersion = useMemo(() => findEditableVersion(editingWork), [editingWork])
   // v1.3：单候选版本限制——编辑已存在作品时校验是否允许创建新版本
   const newVersionCheck = editingWork ? canCreateNewVersion(editingWork) : { allowed: true }
   const isLocked = editingWork ? !newVersionCheck.allowed && !editingWork.versions.some((v) => v.status === 'draft' || v.status === 'rejected') : false
+  const canCreateWork = hasPermission('work:create')
+  const canSubmitWork = hasPermission('work:submit')
+  const canEditOwnWork = hasPermission('work:editOwn')
+  const canSaveDraft = editingWork
+    ? canEditOwnWork && (!!editableVersion || canSubmitWork)
+    : canCreateWork
+  const canSubmitCurrent = editingWork
+    ? canEditOwnWork && canSubmitWork
+    : canCreateWork && canSubmitWork
 
-  const [type, setType] = useState<WorkType>(editingWork?.type || 'skill')
-  const [title, setTitle] = useState(editingWork?.title || '')
-  const [category, setCategory] = useState(editingWork?.category || '财务')
-  const [tags, setTags] = useState<string[]>(editingWork?.tags || [])
-  const [intro, setIntro] = useState(editingWork?.intro || '')
-  const [usage, setUsage] = useState(editingWork?.usage || '')
-  const [businessValue, setBusinessValue] = useState(editingWork?.businessValue || '')
-  const [scene, setScene] = useState(editingWork?.scene || '')
-  const [coreAbilities, setCoreAbilities] = useState(editingWork?.coreAbilities?.join('；') || '')
+  const [type, setType] = useState<WorkType>(editableVersion?.type ?? editingWork?.type ?? 'skill')
+  const [title, setTitle] = useState(editableVersion?.title ?? editingWork?.title ?? '')
+  const [category, setCategory] = useState(editableVersion?.category ?? editingWork?.category ?? '财务')
+  const [tags, setTags] = useState<string[]>(editableVersion?.tags ?? editingWork?.tags ?? [])
+  const [intro, setIntro] = useState(editableVersion?.intro ?? editingWork?.intro ?? '')
+  const [usage, setUsage] = useState(editableVersion?.usage ?? editingWork?.usage ?? '')
+  const [businessValue, setBusinessValue] = useState(editableVersion?.businessValue ?? editingWork?.businessValue ?? '')
+  const [scene, setScene] = useState(editableVersion?.scene ?? editingWork?.scene ?? '')
+  const [coreAbilities, setCoreAbilities] = useState((editableVersion?.coreAbilities ?? editingWork?.coreAbilities ?? []).join('；'))
+  const initialCoverUrl = editableVersion ? editableVersion.coverUrl : editingWork?.coverUrl
   // v1.3：封面和附件支持真实文件上传
   const [coverFile, setCoverFile] = useState<{ url: string; name: string; size: string } | null>(
-    editingWork?.coverUrl ? { url: editingWork.coverUrl, name: '已上传封面', size: '' } : null
+    initialCoverUrl ? { url: initialCoverUrl, name: '已上传封面', size: '' } : null
   )
   // v2.0：附件初始化逻辑
   // - 编辑现有草稿/驳回版本：加载该版本自己的附件
@@ -74,7 +85,49 @@ export default function Publish() {
   // 只记录本次打开编辑页后新上传、尚未关联到作品版本的附件。
   const pendingAttachmentNamesRef = useRef(new Set<string>())
   const [customTag, setCustomTag] = useState('')
-  const [changelog, setChangelog] = useState('')
+  const [changelog, setChangelog] = useState(editableVersion?.changelog || '')
+  const hydratedEditRef = useRef<string | null>(null)
+  const requestedEditRef = useRef<string | null>(null)
+
+  // 后台列表采用服务端分页且可能省略详情字段。进入编辑页时始终按 ID 补拉完整详情，
+  // 不能仅凭列表中已存在作品就跳过，否则草稿版本的附件等详情字段可能为空。
+  useEffect(() => {
+    if (!editId || requestedEditRef.current === editId) return
+    requestedEditRef.current = editId
+    refreshWork(editId).then((work) => {
+      if (!work) addToast('error', '作品不存在或无权查看')
+    })
+  }, [addToast, editId, refreshWork])
+
+  // 全局作品数据可能在路由打开后才从接口返回；仅在首次拿到该草稿时，用版本快照完整回填表单。
+  useEffect(() => {
+    if (!editId || !editingWork) return
+    // 列表缓存与完整详情可能具有相同版本号，但前者不一定包含版本附件。
+    // 将附件指纹纳入 hydration key，保证完整详情到达后能再次回填附件。
+    const attachmentFingerprint = (editableVersion?.attachments || [])
+      .map((attachment) => attachment.storedName || attachment.id)
+      .join(',')
+    const hydrationKey = `${editId}:${editableVersion?.version || 'online'}:${attachmentFingerprint}`
+    if (hydratedEditRef.current === hydrationKey) return
+    const source = editableVersion
+    setType(source?.type ?? editingWork.type)
+    setTitle(source?.title ?? editingWork.title)
+    setCategory(source?.category ?? editingWork.category)
+    setTags(source?.tags ?? editingWork.tags)
+    setIntro(source?.intro ?? editingWork.intro)
+    setUsage(source?.usage ?? editingWork.usage)
+    setBusinessValue(source?.businessValue ?? editingWork.businessValue ?? '')
+    setScene(source?.scene ?? editingWork.scene ?? '')
+    setCoreAbilities((source?.coreAbilities ?? editingWork.coreAbilities ?? []).join('；'))
+    const coverUrl = source ? source.coverUrl : editingWork.coverUrl
+    setCoverFile(coverUrl ? { url: coverUrl, name: '已上传封面', size: '' } : null)
+    const attachmentSource = source || editingWork.versions.find((v) => v.current) || editingWork.versions[0]
+    setAttachments((attachmentSource?.attachments || []).map((a) => ({
+      id: a.id, name: a.name, size: a.size, url: a.url, storedName: a.storedName,
+    })))
+    setChangelog(source?.changelog || '')
+    hydratedEditRef.current = hydrationKey
+  }, [editId, editableVersion, editingWork])
 
   // v2.1：本次新上传的附件立即清理物理文件；已有版本附件仅从当前编辑表单移除，保存时由版本更新事务处理。
   const handleRemoveAttachment = async (index: number) => {
@@ -114,7 +167,6 @@ export default function Publish() {
   }
 
   // v1.1：当前可编辑版本
-  const editableVersion = useMemo(() => findEditableVersion(editingWork), [editingWork])
   // v1.1：是否需要创建新版本（编辑已发布/已下架且无草稿/驳回版本时）
   const isNewVersion = !!editingWork && !editableVersion
   // v1.3：当前操作版本号（用于显示提示，v1/v2/v3 格式）
@@ -156,6 +208,31 @@ export default function Publish() {
     if (!intro.trim() || intro.trim().length < 10) return '作品简介至少 10 个字符'
     if (intro.trim().length > 100) return '作品简介不超过 100 个字符'
     if (!usage.trim() || usage.trim().length < 20) return '使用说明至少 20 个字符'
+    if (usage.length > 2000) return '使用说明不超过 2000 个字符'
+    if (businessValue.length > 500) return '业务价值不超过 500 个字符'
+    if (scene.length > 200) return '应用场景不超过 200 个字符'
+    if (coreAbilities.length > 500) return '核心能力合计不超过 500 个字符'
+    const abilityItems = coreAbilities.split(/[#；;。\n]/).map((item) => item.trim()).filter(Boolean)
+    if (abilityItems.length > 10) return '核心能力最多填写 10 项'
+    if (abilityItems.some((item) => item.length > 100)) return '单项核心能力不超过 100 个字符'
+    if (changelog.length > 500) return '版本说明不超过 500 个字符'
+    return null
+  }
+
+  // 草稿允许必填项未填完，但已填内容不能超过后端字段上限。
+  const validateFieldLengths = (): string | null => {
+    if (title.trim().length > 50) return '作品名称不超过 50 个字符'
+    if (tags.length > 5) return '最多选择 5 个标签'
+    if (tags.some((tag) => tag.trim().length > 30)) return '单个标签不超过 30 个字符'
+    if (intro.trim().length > 100) return '作品简介不超过 100 个字符'
+    if (usage.length > 2000) return '使用说明不超过 2000 个字符'
+    if (businessValue.length > 500) return '业务价值不超过 500 个字符'
+    if (scene.length > 200) return '应用场景不超过 200 个字符'
+    if (coreAbilities.length > 500) return '核心能力合计不超过 500 个字符'
+    const abilityItems = coreAbilities.split(/[#；;。\n]/).map((item) => item.trim()).filter(Boolean)
+    if (abilityItems.length > 10) return '核心能力最多填写 10 项'
+    if (abilityItems.some((item) => item.length > 100)) return '单项核心能力不超过 100 个字符'
+    if (changelog.length > 500) return '版本说明不超过 500 个字符'
     return null
   }
 
@@ -170,7 +247,8 @@ export default function Publish() {
     businessValue: businessValue.trim(),
     scene: scene.trim(),
     coreAbilities: coreAbilities ? coreAbilities.split(/[#；;。\n]/).map((s) => s.trim()).filter(Boolean) : [],
-    coverUrl: coverFile?.url || undefined,
+    // 编辑版本时用空字符串明确表示删除封面，避免 undefined 被后端当成“不修改”。
+    coverUrl: editingWork ? (coverFile?.url ?? '') : (coverFile?.url || undefined),
     attachments: attachments.map((a) => ({
       id: a.id,
       name: a.name,
@@ -230,8 +308,17 @@ export default function Publish() {
 
   // v1.1：保存草稿
   const handleSaveDraft = async () => {
+    if (!canSaveDraft) {
+      addToast('error', editingWork ? '当前角色无编辑作品权限' : '当前角色无创建作品权限')
+      return
+    }
     if (!title.trim()) {
       addToast('error', '请至少填写作品名称')
+      return
+    }
+    const lengthError = validateFieldLengths()
+    if (lengthError) {
+      addToast('error', lengthError)
       return
     }
     if (editingWork) {
@@ -282,6 +369,10 @@ export default function Publish() {
 
   // v1.1：提交审核
   const handleSubmit = async () => {
+    if (!canSubmitCurrent) {
+      addToast('error', '当前角色无提交版本审核权限')
+      return
+    }
     const error = validate()
     if (error) {
       addToast('error', error)
@@ -455,6 +546,7 @@ export default function Publish() {
             <div>
               <label className="block text-xs font-semibold mb-1.5">
                 作品名称 <span style={{ color: 'var(--state-danger)' }}>*</span>
+                <span className="font-normal text-muted-foreground">（2-50 字）</span>
               </label>
               <input
                 type="text"
@@ -465,6 +557,7 @@ export default function Publish() {
                 className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-2"
                 style={{ borderColor: 'var(--aic-border-solid)' }}
               />
+              <div className="text-right text-xs text-muted-foreground mt-1">{title.length}/50</div>
             </div>
             <div>
               <label className="block text-xs font-semibold mb-1.5">
@@ -486,7 +579,7 @@ export default function Publish() {
           <div className="mt-4">
             <label className="block text-xs font-semibold mb-1.5">
               标签 <span style={{ color: 'var(--state-danger)' }}>*</span>
-              <span className="font-normal text-muted-foreground">（最多 5 个）</span>
+              <span className="font-normal text-muted-foreground">（1-5 个，单个不超过 30 字）</span>
             </label>
             <div className="flex flex-wrap gap-2 items-center">
               {tags.map((tag) => (
@@ -515,9 +608,10 @@ export default function Publish() {
                     <input
                       type="text"
                       value={customTag}
-                      onChange={(e) => setCustomTag(e.target.value)}
+                      onChange={(e) => setCustomTag(e.target.value.slice(0, 30))}
                       onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddTag(customTag))}
                       placeholder="自定义标签"
+                      maxLength={30}
                       className="h-7 w-24 rounded border px-2 text-xs outline-none"
                       style={{ borderColor: 'var(--aic-border-solid)' }}
                     />
@@ -637,8 +731,8 @@ export default function Publish() {
                     onChange={async (e) => {
                       const file = e.target.files?.[0]
                       if (!file) return
-                      if (file.size > 50 * 1024 * 1024) {
-                        addToast('error', '附件不能超过 50MB（恰好 50MB 可以上传）')
+                      if (file.size > 100 * 1024 * 1024) {
+                        addToast('error', '附件不能超过 100MB（恰好 100MB 可以上传）')
                         if (attachmentInputRef.current) attachmentInputRef.current.value = ''
                         return
                       }
@@ -671,7 +765,7 @@ export default function Publish() {
                       <>
                         <FileUp size={24} className="text-muted-foreground mb-1" />
                         <span className="text-xs text-muted-foreground">点击选择文件上传</span>
-                        <span className="text-[10px] text-muted-foreground mt-0.5">支持 .zip / .json / .md / .skill 等 · ≤50MB</span>
+                        <span className="text-[10px] text-muted-foreground mt-0.5">支持 .zip / .json / .md / .skill 等 · ≤100MB</span>
                       </>
                     )}
                   </button>
@@ -725,49 +819,66 @@ export default function Publish() {
           <div>
             <label className="block text-xs font-semibold mb-1.5">
               使用说明 <span style={{ color: 'var(--state-danger)' }}>*</span>
-              <span className="font-normal text-muted-foreground">（≥ 20 字）</span>
+              <span className="font-normal text-muted-foreground">（20-2000 字）</span>
             </label>
             <textarea
               value={usage}
               onChange={(e) => setUsage(e.target.value)}
+              maxLength={2000}
               placeholder="详细描述如何使用该作品，包括前置条件、操作步骤、注意事项"
               rows={4}
               className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 resize-y"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
+            <div className="text-right text-xs text-muted-foreground mt-1">{usage.length}/2000</div>
           </div>
           <div className="mt-4">
-            <label className="block text-xs font-semibold mb-1.5">业务价值（可选）</label>
+            <label className="block text-xs font-semibold mb-1.5">
+              业务价值
+              <span className="font-normal text-muted-foreground">（可选，不超过 500 字）</span>
+            </label>
             <textarea
               value={businessValue}
               onChange={(e) => setBusinessValue(e.target.value)}
               placeholder="描述该作品解决了什么业务问题，带来了哪些效率提升或成本节约"
+              maxLength={500}
               rows={3}
               className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 resize-y"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
+            <div className="text-right text-xs text-muted-foreground mt-1">{businessValue.length}/500</div>
           </div>
           <div className="mt-4">
-            <label className="block text-xs font-semibold mb-1.5">应用场景（可选）</label>
+            <label className="block text-xs font-semibold mb-1.5">
+              应用场景
+              <span className="font-normal text-muted-foreground">（可选，不超过 200 字）</span>
+            </label>
             <input
               type="text"
               value={scene}
               onChange={(e) => setScene(e.target.value)}
+              maxLength={200}
               placeholder="例如：财务部门月度报表生成、多部门数据汇总分析"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-2"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
+            <div className="text-right text-xs text-muted-foreground mt-1">{scene.length}/200</div>
           </div>
           <div className="mt-4">
-            <label className="block text-xs font-semibold mb-1.5">核心能力（可选，用分号分隔）</label>
+            <label className="block text-xs font-semibold mb-1.5">
+              核心能力
+              <span className="font-normal text-muted-foreground">（可选，分号分隔，最多 10 项且合计不超过 500 字）</span>
+            </label>
             <input
               type="text"
               value={coreAbilities}
               onChange={(e) => setCoreAbilities(e.target.value)}
+              maxLength={500}
               placeholder="例如：自动解析数据源；支持自定义模板；定时任务调度"
               className="h-10 w-full rounded-md border px-3 text-sm outline-none focus:ring-2"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
+            <div className="text-right text-xs text-muted-foreground mt-1">{coreAbilities.length}/500</div>
           </div>
         </div>
 
@@ -778,8 +889,8 @@ export default function Publish() {
           <label className="block text-sm font-semibold mb-3">
             步骤 5：版本说明
             {isChangelogRequired
-              ? <span style={{ color: 'var(--state-danger)' }}> *</span>
-              : <span className="font-normal text-muted-foreground">（可选）</span>}
+              ? <><span style={{ color: 'var(--state-danger)' }}> *</span><span className="font-normal text-muted-foreground">（20-500 字）</span></>
+              : <span className="font-normal text-muted-foreground">（可选，不超过 500 字）</span>}
           </label>
           <div className="flex items-center gap-2 mb-2">
             <span className="text-xs px-2 py-1 rounded font-medium" style={{ backgroundColor: 'var(--aic-primary-light)', color: 'var(--aic-primary)' }}>
@@ -792,8 +903,9 @@ export default function Publish() {
           <textarea
             value={changelog}
             onChange={(e) => setChangelog(e.target.value)}
+            maxLength={500}
             placeholder={isChangelogRequired
-              ? '请描述本次版本的主要更新内容（至少 10 字符），便于审核员快速了解变更'
+              ? '请描述本次版本的主要更新内容（至少 20 个字符），便于审核员快速了解变更'
               : editingWork
                 ? '描述本次版本的主要更新内容，便于审核员快速了解变更'
                 : '初始版本说明，例如：首个版本，包含核心功能'}
@@ -801,13 +913,15 @@ export default function Publish() {
             className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 resize-y"
             style={{ borderColor: 'var(--aic-border-solid)' }}
           />
+          <div className="text-right text-xs text-muted-foreground mt-1">{changelog.length}/500</div>
         </div>
 
         {/* 操作按钮 */}
         <div className="flex justify-end gap-2 pt-2">
           <button
             onClick={handleSaveDraft}
-            disabled={isLocked}
+            disabled={isLocked || !canSaveDraft}
+            title={!canSaveDraft ? '当前角色无保存草稿权限' : undefined}
             className="inline-flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm font-medium transition hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ borderColor: 'var(--aic-border-solid)' }}
           >
@@ -815,7 +929,8 @@ export default function Publish() {
           </button>
           <button
             onClick={handleSubmit}
-            disabled={isLocked}
+            disabled={isLocked || !canSubmitCurrent}
+            title={!canSubmitCurrent ? '当前角色无提交版本审核权限' : undefined}
             className="inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
             style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
           >

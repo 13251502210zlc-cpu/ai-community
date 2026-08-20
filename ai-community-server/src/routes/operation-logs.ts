@@ -24,10 +24,48 @@ function getClientIp(req: Request): string {
   return req.socket.remoteAddress?.replace(/^::ffff:/, '') || '127.0.0.1'
 }
 
-// 格式化时间为前端展示格式 YYYY-MM-DD HH:mm:ss
+// 格式化时间为统一展示格式 YYYY/M/D H:mm（北京时间）
 function formatTime(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  )
+  return `${values.year}/${values.month}/${values.day} ${Number(values.hour)}:${values.minute}`
+}
+
+// 前端筛选项包含聚合枚举，数据库保存的是更精确的动作值。
+// 同时兼容历史上直接保存的聚合值，避免旧日志查不到。
+function actionCondition(action: string): Record<string, unknown> {
+  const legacyLogout = { action: '创建', content: { contains: '/api/auth/logout' } }
+  const legacyRoleAssignment = {
+    AND: [
+      { action: '更新' },
+      { content: { contains: '/api/admin/users/' } },
+      { content: { contains: '/role' } },
+    ],
+  }
+  if (action === '创建') return { action: '创建', NOT: { content: { contains: '/api/auth/logout' } } }
+  if (action === '更新') return { action: '更新', NOT: legacyRoleAssignment }
+  if (action === '审核') return { action: { in: ['审核', '审核通过', '审核驳回', '提交审核'] } }
+  if (action === '上架/下架') return { action: { in: ['上架', '下架', '上架/下架'] } }
+  if (action === '登录/登出') {
+    return { OR: [{ action: { in: ['登录', '登出', '登录/登出'] } }, legacyLogout] }
+  }
+  if (action === '角色分配') return { OR: [{ action: '角色分配' }, legacyRoleAssignment] }
+  return { action }
+}
+
+function appendWhereCondition(where: Record<string, any>, condition: Record<string, unknown>) {
+  where.AND = [...(where.AND || []), condition]
 }
 
 // 将数据库记录转换为前端 OperationLog 结构
@@ -89,7 +127,7 @@ router.get('/', authRequired, async (req: Request, res: Response, next: NextFunc
     }
 
     if (moduleFilter) where.module = moduleFilter
-    if (actionFilter) where.action = actionFilter
+    if (actionFilter) appendWhereCondition(where, actionCondition(actionFilter))
 
     // 时间范围过滤
     if (startDate || endDate) {
@@ -105,12 +143,17 @@ router.get('/', authRequired, async (req: Request, res: Response, next: NextFunc
 
     // 关键词搜索（操作人、操作内容、操作对象、日志ID）
     if (keyword.trim()) {
-      where.OR = [
-        { operatorName: { contains: keyword } },
-        { content: { contains: keyword } },
-        { target: { contains: keyword } },
-        { id: { contains: keyword } },
-      ]
+      const terms = Array.from(new Set([keyword.trim(), keyword.trim().replace(/[\/／]/g, '')])).filter(Boolean)
+      appendWhereCondition(where, { OR: [
+        ...terms.flatMap((term) => [
+          { operatorName: { contains: term } },
+          { content: { contains: term } },
+          { target: { contains: term } },
+          { action: { contains: term } },
+          { module: { contains: term } },
+          { id: { contains: term } },
+        ]),
+      ] })
     }
 
     const [total, rows] = await Promise.all([
@@ -153,7 +196,7 @@ router.get('/export', authRequired, async (req: Request, res: Response, next: Ne
 
     const where: any = {}
     if (moduleFilter) where.module = moduleFilter
-    if (actionFilter) where.action = actionFilter
+    if (actionFilter) appendWhereCondition(where, actionCondition(actionFilter))
     if (startDate || endDate) {
       where.time = {}
       if (startDate) where.time.gte = new Date(startDate)
@@ -164,12 +207,17 @@ router.get('/export', authRequired, async (req: Request, res: Response, next: Ne
       }
     }
     if (keyword.trim()) {
-      where.OR = [
-        { operatorName: { contains: keyword } },
-        { content: { contains: keyword } },
-        { target: { contains: keyword } },
-        { id: { contains: keyword } },
-      ]
+      const terms = Array.from(new Set([keyword.trim(), keyword.trim().replace(/[\/／]/g, '')])).filter(Boolean)
+      appendWhereCondition(where, { OR: [
+        ...terms.flatMap((term) => [
+          { operatorName: { contains: term } },
+          { content: { contains: term } },
+          { target: { contains: term } },
+          { action: { contains: term } },
+          { module: { contains: term } },
+          { id: { contains: term } },
+        ]),
+      ] })
     }
 
     const rows = await prisma.operationLog.findMany({

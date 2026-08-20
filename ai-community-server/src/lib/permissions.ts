@@ -22,7 +22,6 @@ export type Permission =
   | 'review:view' // 查看审核队列
   | 'review:approve' // 审核通过版本
   | 'review:reject' // 驳回版本
-  | 'review:forceOffline' // 强制下架违规作品
   | 'admin:domain' // 业务领域管理
   | 'admin:tag' // 标签管理
   | 'admin:user' // 用户管理 / 角色查看
@@ -36,11 +35,11 @@ export type Permission =
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   user: ['work:read', 'work:create'],
   creator: ['work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn'],
-  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'review:forceOffline', 'admin:workRead', 'admin:workManage'],
+  reviewer: ['work:read', 'review:view', 'review:approve', 'review:reject', 'admin:stats', 'admin:workRead', 'admin:workManage'],
   operator: ['work:read', 'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:workRead', 'admin:workManage'],
   super_admin: [
     'work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn',
-    'review:view', 'review:approve', 'review:reject', 'review:forceOffline',
+    'review:view', 'review:approve', 'review:reject',
     'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:role', 'admin:workRead', 'admin:workManage',
   ],
 }

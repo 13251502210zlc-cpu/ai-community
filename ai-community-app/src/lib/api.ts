@@ -3,6 +3,7 @@
 // 生产环境：相对路径 /api（由 nginx 反向代理到后端）
 
 import type { Permission, UserRole, Work, WorkVersion } from '../types'
+import { formatDateTime } from './datetime'
 
 const API_BASE = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api'
 const ASSET_BASE = import.meta.env.DEV ? 'http://localhost:3001' : ''
@@ -103,7 +104,11 @@ export async function apiFetch<T = unknown>(
   }
 
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: '请求失败' }))
+    const err = await res.json().catch(() => ({
+      error: res.status === 413
+        ? '上传内容超过网关限制，请确认服务器已允许 100MB 附件'
+        : '请求失败',
+    }))
     const detailMessage = Array.isArray(err.details) && typeof err.details[0]?.message === 'string'
       ? err.details[0].message
       : null
@@ -161,6 +166,11 @@ export async function getWorkDetail(workId: string): Promise<any> {
 // v2.0：获取运营推荐作品（公开，作品大厅首屏展示）
 export async function getRecommendedWorks(): Promise<any[]> {
   return apiFetch('/works/recommended')
+}
+
+// 后台推荐管理使用全量列表，包含历史遗留的第 6 条及之后的推荐。
+export async function getAdminRecommendedWorks(): Promise<any[]> {
+  return apiFetch('/admin/works/recommended')
 }
 
 // ============ 认证相关 API ============
@@ -360,21 +370,27 @@ function normalizeReviewWorkType(value: unknown): Work['type'] {
 // 兼容旧后端的扁平审核队列响应，避免前后端滚动发布期间因 item.work 缺失导致整页白屏。
 function normalizeReviewQueueItem(raw: any): ReviewQueueItem | null {
   if (raw?.work?.id && raw?.version && typeof raw.version === 'object') {
-    const submittedAt = raw.version.submittedAt ? String(raw.version.submittedAt) : ''
+    const submittedAt = formatDateTime(raw.version.submittedAt)
     return {
       work: {
         ...raw.work,
         type: normalizeReviewWorkType(raw.work.type),
         tags: Array.isArray(raw.work.tags) ? raw.work.tags : [],
-        versions: Array.isArray(raw.work.versions) ? raw.work.versions : [],
+        versions: Array.isArray(raw.work.versions) ? raw.work.versions.map((version: any) => ({
+          ...version,
+          date: formatDateTime(version.createdAt || version.date),
+          submittedAt: formatDateTime(version.submittedAt),
+          reviewedAt: version.reviewedAt ? formatDateTime(version.reviewedAt) : undefined,
+        })) : [],
         attachments: Array.isArray(raw.work.attachments) ? raw.work.attachments : [],
         comments: Array.isArray(raw.work.comments) ? raw.work.comments : [],
       },
       version: {
         ...raw.version,
-        date: raw.version.date || submittedAt,
+        date: formatDateTime(raw.version.createdAt || raw.version.date) || submittedAt,
         status: raw.version.status || 'pending',
         submittedAt,
+        reviewedAt: raw.version.reviewedAt ? formatDateTime(raw.version.reviewedAt) : undefined,
       },
       isFirstVersion: raw.isFirstVersion ?? !raw.onlineVersion,
       onlineVersion: raw.onlineVersion || undefined,
@@ -385,7 +401,7 @@ function normalizeReviewQueueItem(raw: any): ReviewQueueItem | null {
     return null
   }
 
-  const submittedAt = raw.submittedAt ? String(raw.submittedAt) : ''
+  const submittedAt = formatDateTime(raw.submittedAt)
   const version: WorkVersion = {
     version: raw.version,
     changelog: raw.changelog || '',
@@ -452,6 +468,22 @@ export async function getReviewStats(): Promise<{
   return apiFetch('/admin/review/stats')
 }
 
+export interface AdminStatsResult {
+  summary: {
+    totalWorks: number
+    totalUsers: number
+    totalDownloads: number
+    pendingVersions: number
+  }
+  publishedWorks: number
+  typeDistribution: Array<{ type: Work['type']; count: number }>
+  topWorks: Array<Pick<Work, 'id' | 'title' | 'type' | 'authorName' | 'department' | 'downloads' | 'likes'>>
+}
+
+export async function getAdminStats(): Promise<AdminStatsResult> {
+  return apiFetch('/admin/stats')
+}
+
 // ============ 作品 CRUD API ============
 
 // 创建作品
@@ -515,6 +547,39 @@ export async function addCommentApi(workId: string, content: string): Promise<an
 // 切换运营推荐
 export async function toggleRecommendApi(workId: string): Promise<{ recommended: boolean }> {
   return apiFetch(`/admin/works/${workId}/recommend`, { method: 'POST' })
+}
+
+export interface AdminWorksResult {
+  items: any[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+  stats: {
+    total: number
+    published: number
+    offline: number
+    deleted: number
+    unpublished: number
+  }
+}
+
+// 后台作品管理：服务端分页、筛选和全量状态统计。
+export async function getAdminWorks(params: {
+  page?: number
+  pageSize?: number
+  status?: string
+  type?: string
+  q?: string
+}): Promise<AdminWorksResult> {
+  const query = new URLSearchParams()
+  if (params.page) query.set('page', String(params.page))
+  if (params.pageSize) query.set('pageSize', String(params.pageSize))
+  if (params.status && params.status !== 'all') query.set('status', params.status)
+  if (params.type && params.type !== 'all') query.set('type', params.type)
+  if (params.q?.trim()) query.set('q', params.q.trim())
+  const qs = query.toString()
+  return apiFetch(`/admin/works${qs ? `?${qs}` : ''}`)
 }
 
 // ============ 版本管理 API ============
@@ -697,7 +762,11 @@ export async function getOperationLogs(params: {
   if (params.keyword) query.set('keyword', params.keyword)
   if (params.operatorId) query.set('operatorId', params.operatorId)
   const qs = query.toString()
-  return apiFetch(`/operation-logs${qs ? `?${qs}` : ''}`)
+  const result = await apiFetch<OperationLogQueryResult>(`/operation-logs${qs ? `?${qs}` : ''}`)
+  return {
+    ...result,
+    items: result.items.map((item) => ({ ...item, time: formatDateTime(item.time) })),
+  }
 }
 
 // 导出操作日志 CSV 下载链接（超管专用，浏览器直接下载）

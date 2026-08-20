@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express'
-import { ROLE_PERMISSIONS, type Permission, type UserRole } from './permissions.js'
+import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission, type UserRole } from './permissions.js'
 import { extractUserFromAuthHeader } from './jwt.js'
 import { prisma } from './prisma.js'
 
@@ -108,6 +108,10 @@ export async function authRequired(req: Request, res: Response, next: NextFuncti
 
 // 权限校验中间件工厂（v1.7：基于多角色并集）
 export async function getEffectivePermissions(userRoles: UserRole[]): Promise<Permission[]> {
+  // 超级管理员是系统保护角色，始终拥有全部权限，不读取数据库中的可配置项。
+  // 这样即使历史数据中残留了 super_admin 的权限记录，也不会削弱超管权限。
+  if (userRoles.includes('super_admin')) return [...ALL_PERMISSIONS]
+
   const rows = await prisma.rolePermission.findMany({ where: { role: { in: userRoles } } })
   const configuredRoles = new Set(rows.map((row) => row.role))
   const effective = new Set<Permission>()
@@ -115,7 +119,7 @@ export async function getEffectivePermissions(userRoles: UserRole[]): Promise<Pe
   for (const role of userRoles) {
     if (configuredRoles.has(role)) {
       rows
-        .filter((row) => row.role === role && row.allowed)
+        .filter((row) => row.role === role && row.allowed && ALL_PERMISSIONS.includes(row.permission as Permission))
         .forEach((row) => effective.add(row.permission as Permission))
     } else {
       ROLE_PERMISSIONS[role]?.forEach((permission) => effective.add(permission))

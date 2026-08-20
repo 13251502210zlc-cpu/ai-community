@@ -12,6 +12,8 @@ function moduleForPath(path: string): string {
 }
 
 function actionForMethod(method: string, path: string): string {
+  if (path.includes('/auth/logout')) return '登出'
+  if (/\/admin\/users\/[^/?]+\/roles?(?:[/?]|$)/.test(path)) return '角色分配'
   if (path.includes('/approve')) return '审核通过'
   if (path.includes('/reject')) return '审核驳回'
   if (path.includes('/submit')) return '提交审核'
@@ -21,6 +23,11 @@ function actionForMethod(method: string, path: string): string {
   if (method === 'PUT' || method === 'PATCH') return '更新'
   if (method === 'DELETE') return '删除'
   return method
+}
+
+function targetForPath(path: string): string {
+  const workMatch = path.match(/\/works\/([^/?]+)/)
+  return workMatch ? decodeURIComponent(workMatch[1]) : ''
 }
 
 export function auditMutations(req: Request, res: Response, next: NextFunction) {
@@ -40,7 +47,9 @@ export function auditMutations(req: Request, res: Response, next: NextFunction) 
           content: req.originalUrl.includes('/offline') && typeof req.body?.reason === 'string'
             ? `${req.method} ${req.originalUrl.split('?')[0]}；下架原因：${req.body.reason.trim()}`
             : `${req.method} ${req.originalUrl.split('?')[0]}`,
-          target: req.params?.id || req.params?.workId || '',
+          // 此中间件挂载在路由之前，响应结束时 req.params 可能已被 Express 清空，
+          // 因此从原始 URL 提取作品 ID，确保上下架日志有明确操作对象。
+          target: req.params?.id || req.params?.workId || targetForPath(req.originalUrl),
           ip: (req.ip || req.socket.remoteAddress || '').replace(/^::ffff:/, ''),
           result: res.statusCode < 400 ? 'success' : 'failed',
         },

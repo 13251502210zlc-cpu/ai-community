@@ -1,7 +1,7 @@
 # AI 社区平台接口文档
 
-> 文档版本：`v2.2.0`
-> 更新日期：2026-08-12
+> 文档版本：`v2.2.4`
+> 更新日期：2026-08-19
 > 后端包版本：`1.0.0`
 > 接口基线：当前工作区 `ai-community-server/src` 代码，共 64 个路由（含 3 个兼容路径）
 > 生产测试地址：`https://aicommunity-test.cdf-hn.com`
@@ -16,6 +16,10 @@
 
 | 文档版本 | 日期 | 变更类型 | 修订内容 |
 |---|---|---|---|
+| `v2.2.4` | 2026-08-19 | 权限简化 | 移除冗余权限 `review:forceOffline`；管理员上架、下架和删除任意作品统一使用 `admin:workManage` |
+| `v2.2.3` | 2026-08-18 | 权限说明 | 明确权限矩阵需保存后生效、同一用户多角色权限取并集；前端创建、保存、提交、编辑及撤回入口改为跟随服务端有效权限，并在切回页面时刷新权限 |
+| `v2.2.2` | 2026-08-18 | 权限修正 | 超级管理员固定拥有全部权限且不参与权限配置；拥有 `admin:workManage` 权限的角色可查看并下载他人作品已有附件 |
+| `v2.2.1` | 2026-08-18 | 约束修正 | 附件上传上限调整为 100 MB（含边界值）；版本说明至少 20 个字符；审核意见最多 200 个字符；标签名称最多 30 个字符；删除态作品禁止继续操作；上下架操作由服务端自动记日志 |
 | `v2.2.0` | 2026-08-12 | 新增、修复 | 新增附件删除 POST 网关兼容接口；说明生产网关拦截 DELETE 的处理方式；接口总数更新为 64 |
 | `v2.1.0` | 2026-08-11 | 新增、修正 | 用户作品和收藏采用 `/api/users/{id}/...` 标准路径并保留 `/api/auth/users/{id}/...` 兼容路径；补充附件下载、后台作品列表、账号配置及权限矩阵接口；接口总数更新为 63 |
 | `v2.0.0` | 2026-08-10 | 基线版本 | 按当前后端源码重新整理认证、作品、版本审核、后台管理和操作日志接口，共 57 个路由 |
@@ -90,7 +94,7 @@ Authorization: Bearer <token>
 |---|---|---|
 | 普通用户 | `user` | `work:read`, `work:create` |
 | 创作者 | `creator` | `work:read`, `work:create`, `work:submit`, `work:editOwn`, `work:deleteOwn`, `work:offlineOwn` |
-| 审核管理员 | `reviewer` | `work:read`, `review:view`, `review:approve`, `review:reject`, `review:forceOffline`, `admin:workRead`, `admin:workManage` |
+| 审核管理员 | `reviewer` | `work:read`, `review:view`, `review:approve`, `review:reject`, `admin:workRead`, `admin:workManage` |
 | 运营管理员 | `operator` | `work:read`, `admin:domain`, `admin:tag`, `admin:user`, `admin:recommend`, `admin:stats`, `admin:workRead`, `admin:workManage` |
 | 超级管理员 | `super_admin` | 全部权限（额外包含 `admin:role`） |
 
@@ -340,7 +344,7 @@ HTTP 状态为 `403`。请求体中的 `role` 或 `roles` 均不会生效。
 |---|---|---|---|
 | POST | `/upload/cover` | 图片 MIME，最大 5 MB | `{ url, name, size }` |
 | POST | `/upload/attachment` | 最大 100 MB；拒绝 exe/bat/cmd/sh/js/ts | `{ id, url, name, size, storedName }` |
-| GET | `/upload/attachment/:filename` | 作者/审核/运营/超管，或已发布作品的当前版本附件 | 返回附件文件流；`Content-Disposition: attachment` |
+| GET | `/upload/attachment/:filename` | 作者、拥有 `admin:workManage` 权限的角色，或已发布作品的当前版本附件 | 返回附件文件流；`Content-Disposition: attachment` |
 | DELETE | `/upload/attachment/:filename` | `filename` 使用上传响应的 `storedName` | `{ success: true }` |
 | POST | `/upload/attachment/:filename/delete` | DELETE 的网关兼容入口，权限和行为相同 | `{ success: true }` |
 
@@ -416,7 +420,7 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 | `title` | 是 | 2～50 字符；不能与未删除作品重名 |
 | `type` | 是 | `WorkType` 枚举 |
 | `category` | 是 | 必须是后台已存在的业务领域 |
-| `tags` | 是 | 1～5 个非空字符串 |
+| `tags` | 是 | 1～5 个非空字符串；每个标签最多 30 个字符 |
 | `intro` | 是 | 10～100 字符 |
 | `usage` | 是 | 至少 20 字符 |
 | `businessValue` | 否 | 最多 500 字符 |
@@ -433,8 +437,8 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 | 方法 | 路径 | 权限/限制 | 请求体 | 响应 |
 |---|---|---|---|---|
 | PUT | `/works/:id` | 作者需 `work:editOwn`；具有 `admin:workManage` 的审核/运营/超管可管理其他作品 | 创建字段的任意子集；必须存在 `draft` 或 `rejected` 版本 | 更新后的作品 |
-| DELETE | `/works/:id` | `work:deleteOwn`，作者或超管 | 无 | `{ success: true }` |
-| POST | `/works/:id/offline` | 需 `work:offlineOwn`，并且是作者或审核/超管 | 无 | `{ success: true }` |
+| DELETE | `/works/:id` | `work:deleteOwn`，作者或超管；已删除作品不可重复操作 | 无 | `{ success: true }` |
+| POST | `/works/:id/offline` | 需 `work:offlineOwn`，并且是作者或审核/超管；仅已发布作品可下架 | 无 | `{ success: true }` |
 | POST | `/works/:id/republish` | 登录，仅作者且作品已下架 | 无 | `{ success: true }` |
 
 删除为软删除：作品状态改为 `deleted`。
@@ -466,7 +470,7 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 { "changelog": "新增批量导入能力" }
 ```
 
-`changelog` 至少 10 个字符。服务端自动生成下一个版本号；同一作品已有草稿或待审核版本时返回 400，存在候选版本时返回 409 `CANDIDATE_EXISTS`。
+`changelog` 至少 20 个字符。服务端自动生成下一个版本号；同一作品已有草稿或待审核版本时返回 400，存在候选版本时返回 409 `CANDIDATE_EXISTS`。
 
 ### 9.3 版本流转
 
@@ -475,7 +479,7 @@ curl -X POST "https://aicommunity-test.cdf-hn.com/api/upload/cover" \
 | POST | `/works/:workId/versions/:version/submit` | 作者需 `work:submit`；管理员可凭 `admin:workManage` 操作 | `draft` | 返回更新后的版本 |
 | POST | `/works/:workId/versions/:version/withdraw` | `work:submit`，作者 | `pending` | 状态退回 `draft` |
 | POST | `/works/:workId/versions/:version/approve` | `review:approve` | `pending` | 审核结果对象 |
-| POST | `/works/:workId/versions/:version/reject` | `review:reject` | `pending` | `{ "reason": "至少 5 个字符" }` |
+| POST | `/works/:workId/versions/:version/reject` | `review:reject` | `pending` | `{ "reason": "20～200 个字符" }` |
 | POST | `/works/:workId/versions/:version/modify` | `work:submit`，作者 | `rejected` | 状态退回 `draft` |
 | POST | `/works/:workId/versions/:version/publish-candidate` | `work:offlineOwn`，作者 | `candidate=true` | `{ success: true }` |
 
@@ -568,7 +572,7 @@ interface ReviewVersion {
 | 方法 | 路径 | 请求体 | 响应 |
 |---|---|---|---|
 | GET | `/admin/tags` | 无 | 标签对象数组 |
-| POST | `/admin/tags` | `{ "name": "智能体" }` | 201，标签对象 |
+| POST | `/admin/tags` | `{ "name": "智能体" }`；名称最多 30 个字符 | 201，标签对象 |
 | DELETE | `/admin/tags/:id` | 无 | `{ success: true }` |
 
 标签对象：`{ id, name, sortOrder, createdAt }`。
@@ -580,7 +584,7 @@ interface ReviewVersion {
 | GET | `/admin/users` | `admin:user` | Query: `role`, `q` | `{ items, stats: { total, byRole } }` |
 | PUT | `/admin/users/:id/roles` | `admin:role` | `{ "roles": ["creator", "reviewer"] }` | 更新后的用户和 roles |
 | PUT | `/admin/users/:id/role` | `admin:role` | `{ "role": "creator" }` | 旧版单角色兼容接口 |
-| GET | `/admin/permission-matrix` | `admin:role` | 无 | 完整角色权限矩阵 |
+| GET | `/admin/permission-matrix` | `admin:role` | 无 | 完整角色权限矩阵；`super_admin` 固定返回全部权限 |
 | PUT | `/admin/permission-matrix/:role` | `admin:role` | `{ "permissions": ["work:read"] }` | `{ role, permissions }`；不能修改 `super_admin` |
 | PUT | `/admin/users/:id/account` | `admin:user` | `loginMethod`, `loginAccount`, `password`, `accountStatus` 的任意子集 | 更新后的后台用户对象 |
 | POST | `/admin/users/:id/reset-password` | `admin:user` | 无 | `{ success: true, temporaryPassword }` |
@@ -602,6 +606,8 @@ interface ReviewVersion {
 ### 11.1 写入日志
 
 `POST /operation-logs` 已禁用并返回 405。所有关键操作由服务端审计中间件自动记录，客户端不能新增、修改或删除日志。
+
+作品上下架（`offline`、`republish`、`publish-candidate`）均自动写入操作日志；管理员强制下架时日志同时记录下架原因和作品 ID。
 
 ```json
 {

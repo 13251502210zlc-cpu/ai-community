@@ -6,9 +6,9 @@ import { authRequired, requirePermission } from '../lib/auth.js'
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission, type UserRole } from '../lib/permissions.js'
 import { publishApprovedCandidate } from '../lib/version-service.js'
 import { getUnsafeTagReason } from '../lib/content-filter.js'
+import { ARCHIVED_DOMAIN_PREFIX, displayBusinessDomainName } from '../lib/archived-domain.js'
 
 const router = Router()
-const ARCHIVED_DOMAIN_PREFIX = '__archived_domain__:'
 
 function serializeAdminUser(user: any) {
   return {
@@ -86,7 +86,7 @@ router.get('/review/queue', requirePermission('review:view'), async (_req, res, 
               id: w.id,
               title: v.title || w.title,
               type: v.type || w.type,
-              category: v.category || w.category,
+              category: displayBusinessDomainName(v.category || w.category),
               tags: versionTags,
               intro: v.intro || w.intro,
               authorId: w.authorId,
@@ -205,6 +205,48 @@ router.get('/review/stats', requirePermission('review:view'), async (_req, res, 
   }
 })
 
+// GET /api/admin/stats —— 平台统计（不受后台作品列表 100 条上限影响）
+router.get('/stats', requirePermission('admin:stats'), async (_req, res, next) => {
+  try {
+    const [totalWorks, totalUsers, downloadAggregate, pendingVersions, publishedWorks, groupedTypes, topWorks] = await Promise.all([
+      prisma.work.count({ where: { status: { not: 'deleted' } } }),
+      prisma.user.count(),
+      prisma.work.aggregate({ where: { status: 'published' }, _sum: { downloads: true } }),
+      prisma.workVersion.count({ where: { status: 'pending', work: { status: { not: 'deleted' } } } }),
+      prisma.work.count({ where: { status: 'published' } }),
+      prisma.work.groupBy({ by: ['type'], where: { status: 'published' }, _count: { _all: true } }),
+      prisma.work.findMany({
+        where: { status: 'published' },
+        orderBy: [{ downloads: 'desc' }, { publishedAt: 'desc' }],
+        take: 5,
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          authorName: true,
+          department: true,
+          downloads: true,
+          likes: true,
+        },
+      }),
+    ])
+
+    res.json({
+      summary: {
+        totalWorks,
+        totalUsers,
+        totalDownloads: downloadAggregate._sum.downloads || 0,
+        pendingVersions,
+      },
+      publishedWorks,
+      typeDistribution: groupedTypes.map((item) => ({ type: item.type, count: item._count._all })),
+      topWorks,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ============ 业务领域管理 ============
 
 // GET /api/admin/domains
@@ -228,6 +270,10 @@ router.post('/domains', requirePermission('admin:domain'), async (req, res, next
       res.status(400).json({ error: '业务领域名称不能为空', code: 'VALIDATION_ERROR' })
       return
     }
+    if (name.trim().length > 20) {
+      res.status(400).json({ error: '业务领域名称不能超过 20 个字符', code: 'VALIDATION_ERROR' })
+      return
+    }
     const domain = await prisma.businessDomain.create({ data: { name: name.trim() } })
     res.status(201).json(domain)
   } catch (err) {
@@ -241,6 +287,10 @@ router.put('/domains/:id', requirePermission('admin:domain'), async (req, res, n
     const { name } = req.body as { name?: string }
     if (!name || !name.trim()) {
       res.status(400).json({ error: '业务领域名称不能为空', code: 'VALIDATION_ERROR' })
+      return
+    }
+    if (name.trim().length > 20) {
+      res.status(400).json({ error: '业务领域名称不能超过 20 个字符', code: 'VALIDATION_ERROR' })
       return
     }
     const updated = await prisma.businessDomain.update({
@@ -308,6 +358,10 @@ router.post('/tags', requirePermission('admin:tag'), async (req, res, next) => {
     const { name } = req.body as { name?: string }
     if (!name || !name.trim()) {
       res.status(400).json({ error: '标签名称不能为空', code: 'VALIDATION_ERROR' })
+      return
+    }
+    if (name.trim().length > 30) {
+      res.status(400).json({ error: '标签名称不能超过 30 个字符', code: 'VALIDATION_ERROR' })
       return
     }
     const unsafeReason = getUnsafeTagReason(name)
@@ -463,9 +517,13 @@ router.get('/permission-matrix', requirePermission('admin:role'), async (_req, r
     const configured = await prisma.rolePermission.findMany()
     const result: Record<string, string[]> = {}
     for (const role of Object.keys(ROLE_PERMISSIONS) as UserRole[]) {
+      if (role === 'super_admin') {
+        result[role] = [...ALL_PERMISSIONS]
+        continue
+      }
       const rows = configured.filter((row) => row.role === role)
       result[role] = rows.length > 0
-        ? rows.filter((row) => row.allowed).map((row) => row.permission)
+        ? rows.filter((row) => row.allowed && ALL_PERMISSIONS.includes(row.permission as Permission)).map((row) => row.permission)
         : ROLE_PERMISSIONS[role]
     }
     res.json(result)
@@ -590,21 +648,48 @@ router.get('/works', requirePermission('admin:workRead'), async (req, res, next)
     const status = typeof req.query.status === 'string' ? req.query.status : undefined
     const type = typeof req.query.type === 'string' ? req.query.type : undefined
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+    if (q.length > 50) {
+      res.status(400).json({ error: '搜索内容不能超过 50 个字符', code: 'VALIDATION_ERROR' })
+      return
+    }
     const where: any = {
       ...(status && status !== 'all' ? { status } : {}),
       ...(type && type !== 'all' ? { type } : {}),
-      ...(q ? { OR: [{ title: { contains: q } }, { authorName: { contains: q } }] } : {}),
+      ...(q ? { OR: [{ title: { contains: q } }, { authorName: { contains: q } }, { intro: { contains: q } }] } : {}),
     }
-    const [total, items] = await Promise.all([
+    const [total, items, statusGroups] = await Promise.all([
       prisma.work.count({ where }),
       prisma.work.findMany({
         where,
-        include: { tags: true, versions: { orderBy: { createdAt: 'desc' } }, attachments: true },
+        include: {
+          tags: true,
+          versions: { orderBy: { createdAt: 'desc' }, include: { attachments: true } },
+          attachments: true,
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
+      prisma.work.groupBy({
+        by: ['status'],
+        _count: { _all: true },
+      }),
     ])
+    const stats = {
+      total: 0,
+      published: 0,
+      offline: 0,
+      deleted: 0,
+      unpublished: 0,
+    }
+    for (const group of statusGroups) {
+      const count = group._count._all
+      stats.total += count
+      if (group.status === 'published') stats.published = count
+      else if (group.status === 'offline') stats.offline = count
+      else if (group.status === 'deleted') stats.deleted = count
+      else if (group.status === 'unpublished') stats.unpublished = count
+    }
     const workIds = items.map((work) => work.id)
     const [myLikes, myFavorites] = await Promise.all([
       prisma.userLike.findMany({ where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true } }),
@@ -615,6 +700,7 @@ router.get('/works', requirePermission('admin:workRead'), async (req, res, next)
     res.json({
       items: items.map((work) => ({
         ...work,
+        category: displayBusinessDomainName(work.category),
         tags: work.tags.map((tag) => tag.name),
         likedByMe: likedIds.has(work.id),
         favoritedByMe: favoriteIds.has(work.id),
@@ -623,7 +709,29 @@ router.get('/works', requirePermission('admin:workRead'), async (req, res, next)
       page,
       pageSize,
       totalPages: Math.ceil(total / pageSize),
+      stats,
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// GET /api/admin/works/recommended —— 后台查看全部推荐作品。
+// 作品大厅接口只展示前 5 条；后台必须返回全部历史推荐，才能清理旧数据。
+router.get('/works/recommended', requirePermission('admin:recommend'), async (_req, res, next) => {
+  try {
+    const works = await prisma.work.findMany({
+      where: { recommended: true, status: 'published' },
+      include: { tags: true, versions: { orderBy: { createdAt: 'desc' } }, attachments: true },
+      orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+    })
+    res.json(works.map((work) => ({
+      ...work,
+      category: displayBusinessDomainName(work.category),
+      tags: work.tags.map((tag) => tag.name),
+      likedByMe: false,
+      favoritedByMe: false,
+    })))
   } catch (err) {
     next(err)
   }
@@ -632,15 +740,34 @@ router.get('/works', requirePermission('admin:workRead'), async (req, res, next)
 // POST /api/admin/works/:id/recommend —— 切换推荐状态
 router.post('/works/:id/recommend', requirePermission('admin:recommend'), async (req, res, next) => {
   try {
-    const work = await prisma.work.findUnique({ where: { id: req.params.id } })
-    if (!work) {
+    const exists = await prisma.work.findUnique({ where: { id: req.params.id }, select: { id: true } })
+    if (!exists) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const updated = await prisma.work.update({
-      where: { id: req.params.id },
-      data: { recommended: !work.recommended },
-    })
+    let updated: Awaited<ReturnType<typeof prisma.work.update>> | undefined
+    for (let attempt = 0; attempt < 3 && !updated; attempt += 1) {
+      try {
+        updated = await prisma.$transaction(async (tx) => {
+          const work = await tx.work.findUnique({ where: { id: req.params.id } })
+          if (!work) throw new Error('BUSINESS_作品不存在')
+          // 取消推荐始终允许；新增推荐必须由服务端校验发布状态和全局上限。
+          if (!work.recommended) {
+            if (work.status !== 'published') throw new Error('BUSINESS_只有已发布作品可以推荐')
+            const count = await tx.work.count({ where: { recommended: true, status: 'published' } })
+            if (count >= 5) throw new Error('BUSINESS_推荐作品最多 5 个，请先取消其他推荐')
+          }
+          return tx.work.update({
+            where: { id: req.params.id },
+            data: { recommended: !work.recommended },
+          })
+        }, { isolationLevel: 'Serializable' })
+      } catch (error: any) {
+        if (error?.code === 'P2034' && attempt < 2) continue
+        throw error
+      }
+    }
+    if (!updated) throw new Error('BUSINESS_推荐状态更新失败，请重试')
     res.json({ recommended: updated.recommended })
   } catch (err) {
     next(err)
@@ -648,7 +775,7 @@ router.post('/works/:id/recommend', requirePermission('admin:recommend'), async 
 })
 
 // ============ v1.8：管理员作品管理（下架/上架/删除） ============
-// 权限：审核管理员（review:forceOffline）/ 运营管理员（admin:recommend）/ 超级管理员
+// 权限：拥有 admin:workManage 的管理角色
 // 这些接口允许管理员管理平台任意作品，绕过 work:deleteOwn / work:offlineOwn 的"仅自己"限制
 
 // POST /api/admin/works/:id/offline —— 管理员下架作品（已发布 → 已下架）

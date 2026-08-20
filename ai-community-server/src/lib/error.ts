@@ -24,7 +24,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
 
   if (err instanceof multer.MulterError) {
     res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
-      error: err.code === 'LIMIT_FILE_SIZE' ? '上传文件超过大小限制' : '文件上传失败',
+      error: err.code === 'LIMIT_FILE_SIZE' ? '附件不能超过 100MB' : '文件上传失败',
       code: err.code,
     })
     return

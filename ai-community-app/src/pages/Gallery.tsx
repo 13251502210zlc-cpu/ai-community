@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Search, Plus, Star, Loader2 } from 'lucide-react'
 import { useApp, transformWork } from '../store/AppStore'
 import { searchWorks, getRecommendedWorks } from '../lib/api'
@@ -11,14 +11,18 @@ import { EmptyState, Pagination } from '../components/Common'
 const PAGE_SIZE = 12
 
 export default function Gallery() {
-  const { domains, tags, works: sharedWorks } = useApp()
+  const { domains, tags, works: sharedWorks, hasPermission } = useApp()
+  const canCreateWork = hasPermission('work:create')
+  const [urlParams, setUrlParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeType, setActiveType] = useState<WorkType | 'all'>('all')
   const [activeDomain, setActiveDomain] = useState<string | 'all'>('all')
   const [activeTags, setActiveTags] = useState<string[]>([])
   const [sortBy, setSortBy] = useState<SortBy>('latest')
-  const [page, setPage] = useState(1)
+  const requestedPage = Number(urlParams.get('page'))
+  const [page, setPage] = useState(Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1)
+  const filtersMounted = useRef(false)
 
   // v2.0：作品列表从后端 API 分页拉取（支持搜索/筛选/排序）
   const [works, setWorks] = useState<Work[]>([])
@@ -39,7 +43,21 @@ export default function Gallery() {
   }, [search])
 
   // 筛选条件变化时重置到第 1 页
-  useEffect(() => { setPage(1) }, [debouncedSearch, activeType, activeDomain, activeTags, sortBy])
+  useEffect(() => {
+    if (!filtersMounted.current) {
+      filtersMounted.current = true
+      return
+    }
+    setPage(1)
+  }, [debouncedSearch, activeType, activeDomain, activeTags, sortBy])
+
+  // 页码写入地址栏，刷新或手动输入页码后仍能得到稳定结果。
+  useEffect(() => {
+    const next = new URLSearchParams(urlParams)
+    if (page > 1) next.set('page', String(page))
+    else next.delete('page')
+    if (next.toString() !== urlParams.toString()) setUrlParams(next, { replace: true })
+  }, [page, setUrlParams, urlParams])
 
   // 拉取作品列表（搜索/筛选/排序/分页变化时触发）
   useEffect(() => {
@@ -56,9 +74,14 @@ export default function Gallery() {
           page,
           pageSize: PAGE_SIZE,
         })
-        setWorks(data.items.map(transformWork))
+        const safeTotalPages = Math.max(1, data.totalPages)
         setTotal(data.total)
-        setTotalPages(data.totalPages)
+        setTotalPages(safeTotalPages)
+        if (page > safeTotalPages) {
+          setPage(safeTotalPages)
+          return
+        }
+        setWorks(data.items.map(transformWork))
       } catch (err: any) {
         setError(err.message || '加载作品失败')
         setWorks([])
@@ -150,11 +173,13 @@ export default function Gallery() {
               <input
                 type="text"
                 value={search}
-                onChange={(e) => { setSearch(e.target.value) }}
-                placeholder="搜索作品名称、作者、关键词..."
-                className="h-10 w-full rounded-md border pl-9 pr-3 text-sm outline-none focus:ring-2"
+                onChange={(e) => { setSearch(e.target.value.slice(0, 50)) }}
+                maxLength={50}
+                placeholder="搜索作品名称、作者、作品简介..."
+                className="h-10 w-full rounded-md border pl-9 pr-12 text-sm outline-none focus:ring-2"
                 style={{ borderColor: 'var(--aic-border-solid)', backgroundColor: 'var(--aic-background)' }}
               />
+              <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">{search.length}/50</span>
             </div>
             <button
               onClick={() => setDebouncedSearch(search.trim())}
@@ -176,13 +201,15 @@ export default function Gallery() {
               <option value="favorites">最多收藏</option>
               <option value="downloads">最多下载</option>
             </select>
-            <Link
-              to="/publish"
-              className="inline-flex h-10 items-center gap-1 rounded-md px-4 text-sm font-medium text-white transition hover:opacity-90"
-              style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
-            >
-              <Plus size={16} /> 发布作品
-            </Link>
+            {canCreateWork && (
+              <Link
+                to="/publish"
+                className="inline-flex h-10 items-center gap-1 rounded-md px-4 text-sm font-medium text-white transition hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
+              >
+                <Plus size={16} /> 发布作品
+              </Link>
+            )}
           </div>
         </div>
       </section>

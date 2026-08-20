@@ -164,7 +164,7 @@ sudo nginx -s reload
 
 ### Q: 上传文件失败？
 - 确认 `apps/api/uploads/` 目录有写权限：`chmod -R 755 apps/api/uploads`
-- Nginx `client_max_body_size` 已设置为 50M
+- Nginx `client_max_body_size` 设置为 110M，为 multipart 请求开销预留空间；API 仍严格限制单附件不超过 100MB
 
 ## 运维命令
 

@@ -1,14 +1,14 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma.js'
-import { authRequired, getEffectivePermissions, requirePermission } from '../lib/auth.js'
+import { authRequired, requirePermission } from '../lib/auth.js'
 import { approveVersion, publishApprovedCandidate } from '../lib/version-service.js'
 
 const router = Router()
 
 const createVersionSchema = z.object({
   // v1.3：v2 及以上版本必须填写更新说明
-  changelog: z.string().trim().min(20, '更新说明至少 20 个字符'),
+  changelog: z.string().trim().min(20, '更新说明至少 20 个字符').max(500, '更新说明不超过 500 个字符'),
 })
 
 // GET /api/works/:workId/versions —— 版本列表
@@ -36,8 +36,9 @@ router.get('/:workId/versions', authRequired, async (req, res, next) => {
 
 // POST /api/works/:workId/versions —— 创建新版本
 // v1.3：原子生成版本号 + 单候选版本限制 + base_version_id 记录
-router.post('/:workId/versions', authRequired, requirePermission('work:submit', 'admin:workManage'), async (req, res, next) => {
+router.post('/:workId/versions', authRequired, requirePermission('work:submit'), async (req, res, next) => {
   try {
+    const isSuperAdmin = (req.userRoles || []).includes('super_admin')
     const work = await prisma.work.findUnique({
       where: { id: req.params.workId },
       include: { tags: true, versions: { where: { current: true }, include: { attachments: true } } },
@@ -46,8 +47,11 @@ router.post('/:workId/versions', authRequired, requirePermission('work:submit', 
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
-    if (work.authorId !== req.userId && !canManageAll) {
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除', code: 'BUSINESS_ERROR' })
+      return
+    }
+    if (work.authorId !== req.userId && !isSuperAdmin) {
       res.status(403).json({ error: '无权为该作品创建版本', code: 'FORBIDDEN' })
       return
     }
@@ -105,15 +109,19 @@ router.post('/:workId/versions', authRequired, requirePermission('work:submit', 
 })
 
 // POST /api/works/:workId/versions/:version/submit —— 提交版本审核
-router.post('/:workId/versions/:version/submit', authRequired, requirePermission('work:submit', 'admin:workManage'), async (req, res, next) => {
+router.post('/:workId/versions/:version/submit', authRequired, requirePermission('work:submit'), async (req, res, next) => {
   try {
+    const isSuperAdmin = (req.userRoles || []).includes('super_admin')
     const work = await prisma.work.findUnique({ where: { id: req.params.workId } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
-    if (work.authorId !== req.userId && !canManageAll) {
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除', code: 'BUSINESS_ERROR' })
+      return
+    }
+    if (work.authorId !== req.userId && !isSuperAdmin) {
       res.status(403).json({ error: '无权提交该作品版本', code: 'FORBIDDEN' })
       return
     }
@@ -130,11 +138,29 @@ router.post('/:workId/versions/:version/submit', authRequired, requirePermission
       res.status(400).json({ error: '只有草稿版本可以提交审核', code: 'BUSINESS_ERROR' })
       return
     }
-    const tags = target.tagsJson ? JSON.parse(target.tagsJson) as string[] : []
+    let tags: unknown[] = []
+    try {
+      tags = target.tagsJson ? JSON.parse(target.tagsJson) as unknown[] : []
+    } catch {
+      tags = [null]
+    }
+    let coreAbilities: unknown[] = []
+    try {
+      coreAbilities = target.coreAbilities ? JSON.parse(target.coreAbilities) as unknown[] : []
+    } catch {
+      coreAbilities = [null]
+    }
     if (!target.title || target.title.trim().length < 2 || target.title.length > 50 ||
-        !target.category || tags.length < 1 || tags.length > 5 ||
+        !target.category || target.category.trim().length > 20 ||
+        !Array.isArray(tags) || tags.length < 1 || tags.length > 5 || tags.some((tag) => typeof tag !== 'string' || tag.trim().length < 1 || tag.trim().length > 30) ||
         !target.intro || target.intro.trim().length < 10 || target.intro.length > 100 ||
-        !target.usage || target.usage.trim().length < 20) {
+        !target.usage || target.usage.trim().length < 20 || target.usage.length > 2000 ||
+        (target.businessValue?.length || 0) > 500 ||
+        (target.scene?.length || 0) > 200 ||
+        !Array.isArray(coreAbilities) || coreAbilities.length > 10 ||
+        coreAbilities.some((item) => typeof item !== 'string' || item.trim().length < 1 || item.length > 100) ||
+        target.changelog.length > 500 ||
+        (target.version !== 'v1' && target.changelog.trim().length < 20)) {
       res.status(400).json({ error: '版本内容不完整或不符合字段规则', code: 'VALIDATION_ERROR' })
       return
     }
@@ -173,6 +199,10 @@ router.post('/:workId/versions/:version/withdraw', authRequired, requirePermissi
     const work = await prisma.work.findUnique({ where: { id: req.params.workId } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
+      return
+    }
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除', code: 'BUSINESS_ERROR' })
       return
     }
     if (work.authorId !== req.userId) {
@@ -228,6 +258,10 @@ router.post('/:workId/versions/:version/reject', authRequired, requirePermission
       res.status(400).json({ error: '驳回理由至少 20 个字符', code: 'VALIDATION_ERROR' })
       return
     }
+    if (reason.trim().length > 200) {
+      res.status(400).json({ error: '驳回理由不能超过 200 个字符', code: 'VALIDATION_ERROR' })
+      return
+    }
     const work = await prisma.work.findUnique({ where: { id: req.params.workId } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
@@ -250,6 +284,9 @@ router.post('/:workId/versions/:version/reject', authRequired, requirePermission
       return
     }
 
+    const previousRejections = await prisma.reviewEvent.count({
+      where: { workId: work.id, version: target.version, status: 'rejected' },
+    })
     const updated = await prisma.$transaction(async (tx) => {
       const claimed = await tx.workVersion.updateMany({
         where: { id: target.id, status: 'pending' },
@@ -280,7 +317,14 @@ router.post('/:workId/versions/:version/reject', authRequired, requirePermission
       })
       return v
     })
-    res.json(updated)
+    const rejectionCount = previousRejections + 1
+    res.json({
+      ...updated,
+      rejectionCount,
+      warning: rejectionCount >= 3
+        ? `该版本已累计驳回 ${rejectionCount} 次，请关注其内容质量并评估是否适合继续发布`
+        : undefined,
+    })
   } catch (err) {
     next(err)
   }
@@ -292,6 +336,10 @@ router.post('/:workId/versions/:version/modify', authRequired, requirePermission
     const work = await prisma.work.findUnique({ where: { id: req.params.workId } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
+      return
+    }
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除', code: 'BUSINESS_ERROR' })
       return
     }
     if (work.authorId !== req.userId) {
@@ -325,6 +373,10 @@ router.post('/:workId/versions/:version/publish-candidate', authRequired, requir
     const work = await prisma.work.findUnique({ where: { id: req.params.workId } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
+      return
+    }
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除', code: 'BUSINESS_ERROR' })
       return
     }
     if (work.authorId !== req.userId) {

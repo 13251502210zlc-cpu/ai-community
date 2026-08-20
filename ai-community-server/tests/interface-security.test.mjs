@@ -236,6 +236,42 @@ test('权限矩阵接口持久化配置且当前用户权限接口返回实际�
   }
 })
 
+test('超级管理员始终拥有系统全部权限且不受历史配置影响', async () => {
+  const originalRows = await prisma.rolePermission.findMany({ where: { role: 'super_admin' } })
+  const adminHeaders = { authorization: `Bearer ${token(adminId, ['super_admin'])}`, 'content-type': 'application/json' }
+  try {
+    await prisma.rolePermission.deleteMany({ where: { role: 'super_admin' } })
+    await prisma.rolePermission.create({ data: { role: 'super_admin', permission: 'work:read', allowed: false } })
+
+    const permissionsResponse = await request('/api/auth/permissions', { headers: adminHeaders })
+    assert.equal(permissionsResponse.status, 200)
+    const permissions = (await permissionsResponse.json()).permissions
+    assert.ok(permissions.includes('admin:role'))
+    assert.ok(permissions.includes('admin:workManage'))
+    assert.ok(permissions.includes('work:create'))
+
+    const matrixResponse = await request('/api/admin/permission-matrix', { headers: adminHeaders })
+    assert.equal(matrixResponse.status, 200)
+    const matrix = await matrixResponse.json()
+    assert.ok(matrix.super_admin.includes('admin:role'))
+    assert.ok(matrix.super_admin.includes('admin:workManage'))
+
+    const updateResponse = await request('/api/admin/permission-matrix/super_admin', {
+      method: 'PUT',
+      headers: adminHeaders,
+      body: JSON.stringify({ permissions: [] }),
+    })
+    assert.equal(updateResponse.status, 400)
+  } finally {
+    await prisma.rolePermission.deleteMany({ where: { role: 'super_admin' } })
+    if (originalRows.length > 0) {
+      await prisma.rolePermission.createMany({
+        data: originalRows.map(({ role, permission, allowed }) => ({ role, permission, allowed })),
+      })
+    }
+  }
+})
+
 test('客户端不能写审计日志', async () => {
   const response = await request('/api/operation-logs', {
     method: 'POST',
@@ -253,6 +289,122 @@ test('禁用账号的旧 Token 立即失效', async () => {
 test('普通用户不能读取他人的未发布作品', async () => {
   const response = await request(`/api/works/${workId}`, { headers: { authorization: `Bearer ${token(normalId, ['user'])}` } })
   assert.equal(response.status, 404)
+})
+
+test('操作日志全部操作类型筛选均匹配实际及历史动作值', async () => {
+  const log = (action, content, target) => ({
+    time: new Date(),
+    operatorId: adminId,
+    operatorName: '测试超管',
+    department: 'IT部',
+    role: '超级管理员',
+    module: '后台管理',
+    action,
+    content,
+    target: `${target}-${suffix}`,
+    ip: '127.0.0.1',
+    result: 'success',
+  })
+  await prisma.operationLog.createMany({
+    data: [
+      log('创建', 'POST /api/works', 'log-create'),
+      log('更新', 'PUT /api/works/test', 'log-update'),
+      log('删除', 'DELETE /api/works/test', 'log-delete'),
+      log('审核通过', 'POST /api/works/test/approve', 'log-review'),
+      log('上架', 'POST /api/admin/works/test/republish', 'log-online'),
+      log('下架', 'POST /api/admin/works/test/offline', 'log-offline'),
+      log('登录', '账号密码登录成功', 'log-login'),
+      log('创建', 'POST /api/auth/logout', 'log-legacy-logout'),
+      log('角色分配', 'PUT /api/admin/users/test/roles', 'log-role'),
+      log('更新', 'PUT /api/admin/users/test/roles', 'log-legacy-role'),
+    ],
+  })
+  const queryTargets = async (action) => {
+    const response = await request(`/api/operation-logs?action=${encodeURIComponent(action)}&pageSize=100`, {
+      headers: { authorization: `Bearer ${token(adminId, ['super_admin'])}` },
+    })
+    assert.equal(response.status, 200)
+    return (await response.json()).items.map((item) => item.target)
+  }
+  assert.ok((await queryTargets('创建')).includes(`log-create-${suffix}`))
+  assert.ok(!(await queryTargets('创建')).includes(`log-legacy-logout-${suffix}`))
+  assert.ok((await queryTargets('更新')).includes(`log-update-${suffix}`))
+  assert.ok(!(await queryTargets('更新')).includes(`log-legacy-role-${suffix}`))
+  assert.ok((await queryTargets('删除')).includes(`log-delete-${suffix}`))
+  assert.ok((await queryTargets('审核')).includes(`log-review-${suffix}`))
+  const onlineOffline = await queryTargets('上架/下架')
+  assert.ok(onlineOffline.includes(`log-online-${suffix}`))
+  assert.ok(onlineOffline.includes(`log-offline-${suffix}`))
+  const loginLogout = await queryTargets('登录/登出')
+  assert.ok(loginLogout.includes(`log-login-${suffix}`))
+  assert.ok(loginLogout.includes(`log-legacy-logout-${suffix}`))
+  const roleAssignment = await queryTargets('角色分配')
+  assert.ok(roleAssignment.includes(`log-role-${suffix}`))
+  assert.ok(roleAssignment.includes(`log-legacy-role-${suffix}`))
+})
+
+test('具备管理他人作品权限的角色可以查看并下载已有附件', async () => {
+  const originalRows = await prisma.rolePermission.findMany({ where: { role: 'user' } })
+  const targetId = `managed-attachment-work-${suffix}`
+  const storedName = `managed-attachment-${suffix}.txt`
+  const attachmentDir = path.resolve('uploads', 'attachments')
+  const filePath = path.join(attachmentDir, storedName)
+  fs.mkdirSync(attachmentDir, { recursive: true })
+  fs.writeFileSync(filePath, 'managed attachment test')
+
+  try {
+    const work = await prisma.work.create({
+      data: {
+        id: targetId,
+        title: `他人附件权限-${suffix}`,
+        type: 'skill',
+        category: domainName,
+        intro: '用于验证具备管理权限的角色可以查看他人作品附件。',
+        usage: '用于验证具备管理权限的角色可以查看和下载他人作品附件。',
+        authorId: adminId,
+        authorName: '测试超管',
+        department: 'IT部',
+        status: 'unpublished',
+      },
+    })
+    assert.equal(work.id, targetId)
+    const version = await prisma.workVersion.create({
+      data: { workId: targetId, version: 'v1', status: 'draft', changelog: '初始草稿版本' },
+    })
+    await prisma.attachment.create({
+      data: {
+        workId: targetId,
+        versionId: version.id,
+        uploaderId: adminId,
+        name: '他人作品附件.txt',
+        size: '1 KB',
+        url: `/api/upload/attachment/${storedName}`,
+        storedName,
+      },
+    })
+
+    await prisma.rolePermission.deleteMany({ where: { role: 'user' } })
+    await prisma.rolePermission.create({ data: { role: 'user', permission: 'admin:workManage', allowed: true } })
+    const headers = { authorization: `Bearer ${token(normalId, ['user'])}` }
+
+    const detailResponse = await request(`/api/works/${targetId}`, { headers })
+    assert.equal(detailResponse.status, 200)
+    const detail = await detailResponse.json()
+    assert.equal(detail.versions[0].attachments[0].storedName, storedName)
+
+    const downloadResponse = await request(`/api/upload/attachment/${storedName}`, { headers })
+    assert.equal(downloadResponse.status, 200)
+    assert.equal(await downloadResponse.text(), 'managed attachment test')
+  } finally {
+    await prisma.rolePermission.deleteMany({ where: { role: 'user' } })
+    if (originalRows.length > 0) {
+      await prisma.rolePermission.createMany({
+        data: originalRows.map(({ role, permission, allowed }) => ({ role, permission, allowed })),
+      })
+    }
+    await prisma.work.deleteMany({ where: { id: targetId } })
+    fs.rmSync(filePath, { force: true })
+  }
 })
 
 test('用户作品和收藏同时支持标准路径与兼容路径', async () => {
@@ -369,7 +521,11 @@ test('作品内容只有版本审核通过后才切换上线', async () => {
 
   const detailResponse = await request(`/api/works/${createdId}`, { headers: auth })
   assert.equal(detailResponse.status, 200)
-  assert.equal((await detailResponse.json()).title, originalTitle)
+  const draftDetail = await detailResponse.json()
+  assert.equal(draftDetail.title, originalTitle)
+  const savedDraft = draftDetail.versions.find((item) => item.version === version.version)
+  assert.equal(savedDraft.title, changedTitle)
+  assert.equal(savedDraft.intro, '这是第二版更新后的作品简介，审核前不应上线。')
 
   assert.equal((await request(`/api/works/${createdId}/versions/${version.version}/submit`, { method: 'POST', headers: auth })).status, 200)
   const rejectResponse = await request(`/api/works/${createdId}/versions/${version.version}/reject`, {
@@ -456,6 +612,13 @@ test('管理员强制下架必须填写原因', async () => {
   })
   assert.equal(success.status, 200)
   assert.equal((await prisma.work.findUnique({ where: { id: targetId } })).status, 'offline')
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  const auditLog = await prisma.operationLog.findFirst({
+    where: { operatorId: adminId, action: '下架', target: targetId, result: 'success' },
+    orderBy: { time: 'desc' },
+  })
+  assert.ok(auditLog)
+  assert.match(auditLog.content, /测试违规内容下架/)
 })
 
 test('业务领域仅关联已删除作品时仍可删除', async () => {
@@ -478,6 +641,10 @@ test('业务领域仅关联已删除作品时仍可删除', async () => {
   const response = await request(`/api/admin/domains/${disposableDomain.id}`, { method: 'DELETE', headers: adminAuth })
   assert.equal(response.status, 200)
   assert.equal(await prisma.businessDomain.findUnique({ where: { id: disposableDomain.id } }), null)
+  const listResponse = await request('/api/admin/works?status=deleted&pageSize=100', { headers: adminAuth })
+  assert.equal(listResponse.status, 200)
+  const deletedWork = (await listResponse.json()).items.find((work) => work.id === `deleted-domain-work-${suffix}`)
+  assert.equal(deletedWork.category, disposableDomain.name)
 })
 
 test('已审核版本再次审核统一提示该版本已被审核', async () => {
@@ -503,4 +670,177 @@ test('已审核版本再次审核统一提示该版本已被审核', async () =>
   })
   assert.equal(response.status, 400)
   assert.equal((await response.json()).error, '该版本已被审核')
+})
+
+test('超级管理员可以编辑其他作者的作品并写入草稿版本', async () => {
+  const targetId = `admin-edit-guard-${suffix}`
+  await prisma.work.create({
+    data: {
+      id: targetId,
+      title: `禁止代编辑-${suffix}`,
+      type: 'prompt',
+      category: domainName,
+      intro: '用于验证后台管理员不能代替作者编辑作品内容。',
+      usage: '用于验证后台管理员不能代替作者编辑作品内容的完整说明。',
+      authorId: normalId,
+      authorName: '测试用户',
+      department: '测试部',
+      status: 'unpublished',
+      versions: { create: { version: 'v1', status: 'draft', changelog: '初始草稿版本' } },
+    },
+  })
+  const response = await request(`/api/works/${targetId}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token(adminId, ['super_admin'])}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ title: `管理员越权修改-${suffix}` }),
+  })
+  assert.equal(response.status, 200)
+  const updatedDraft = await prisma.workVersion.findUnique({
+    where: { workId_version: { workId: targetId, version: 'v1' } },
+  })
+  assert.equal(updatedDraft.title, `管理员越权修改-${suffix}`)
+})
+
+test('已删除作品不能撤回审核', async () => {
+  const deletedId = `deleted-withdraw-${suffix}`
+  await prisma.work.create({
+    data: {
+      id: deletedId,
+      title: `已删除撤回-${suffix}`,
+      type: 'prompt',
+      category: domainName,
+      intro: '用于验证删除后的作品不能再次撤回审核。',
+      usage: '用于验证删除后的作品不能再次撤回审核的完整说明内容。',
+      authorId: normalId,
+      authorName: '测试用户',
+      department: '测试部',
+      status: 'deleted',
+      versions: { create: { version: 'v1', status: 'pending', changelog: '待审核版本' } },
+    },
+  })
+  const response = await request(`/api/works/${deletedId}/versions/v1/withdraw`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token(normalId, ['user'])}` },
+  })
+  assert.equal(response.status, 400)
+  assert.match((await response.json()).error, /作品已删除/)
+
+  const offlineResponse = await request(`/api/works/${deletedId}/offline`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token(normalId, ['user'])}` },
+  })
+  assert.equal(offlineResponse.status, 400)
+  assert.match((await offlineResponse.json()).error, /作品已删除/)
+})
+
+test('标签名称最多 30 个字符', async () => {
+  const response = await request('/api/admin/tags', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token(adminId, ['super_admin'])}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '标'.repeat(31) }),
+  })
+  assert.equal(response.status, 400)
+  assert.match((await response.json()).error, /30/)
+})
+
+test('作品列表限制搜索长度且越界页码稳定返回空列表', async () => {
+  const headers = { authorization: `Bearer ${token(normalId, ['user'])}` }
+  const tooLong = await request(`/api/works?q=${encodeURIComponent('测'.repeat(51))}`, { headers })
+  assert.equal(tooLong.status, 400)
+  assert.match((await tooLong.json()).error, /50/)
+
+  const overflow = await request('/api/works?page=999999&pageSize=12', { headers })
+  assert.equal(overflow.status, 200)
+  const body = await overflow.json()
+  assert.deepEqual(body.items, [])
+  assert.ok(body.totalPages >= 1)
+})
+
+test('同一版本第三次驳回仍成功并返回管理员提醒', async () => {
+  const targetId = `third-reject-${suffix}`
+  await prisma.work.create({
+    data: {
+      id: targetId,
+      title: `三次驳回-${suffix}`,
+      type: 'prompt',
+      category: domainName,
+      intro: '用于验证第三次驳回时向审核管理员展示提醒。',
+      usage: '用于验证第三次驳回时向审核管理员展示提醒的完整说明。',
+      authorId: normalId,
+      authorName: '测试用户',
+      department: '测试部',
+      status: 'unpublished',
+      versions: { create: { version: 'v1', status: 'pending', changelog: '反复修改的版本' } },
+      events: {
+        create: [
+          { workTitle: `三次驳回-${suffix}`, version: 'v1', status: 'rejected', reviewerId: adminId, reason: '第一次驳回记录' },
+          { workTitle: `三次驳回-${suffix}`, version: 'v1', status: 'rejected', reviewerId: adminId, reason: '第二次驳回记录' },
+        ],
+      },
+    },
+  })
+  const response = await request(`/api/works/${targetId}/versions/v1/reject`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token(adminId, ['super_admin'])}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ reason: '第三次驳回仍然执行，但需要向审核管理员明确展示累计次数提醒。' }),
+  })
+  assert.equal(response.status, 200)
+  const body = await response.json()
+  assert.equal(body.rejectionCount, 3)
+  assert.match(body.warning, /累计驳回 3 次/)
+})
+
+test('推荐接口强制限制最多 5 个且超限时仍允许取消推荐', async () => {
+  const adminHeaders = { authorization: `Bearer ${token(adminId, ['super_admin'])}` }
+  const existingCount = await prisma.work.count({ where: { recommended: true, status: 'published' } })
+  const fillCount = Math.max(0, 5 - existingCount)
+  if (fillCount > 0) {
+    await prisma.work.createMany({
+      data: Array.from({ length: fillCount }, (_, index) => ({
+        id: `recommend-fill-${index}-${suffix}`,
+        title: `推荐占位-${index}-${suffix}`,
+        type: 'prompt',
+        category: domainName,
+        intro: '用于验证推荐作品数量上限的测试作品简介。',
+        usage: '用于验证推荐作品数量上限的完整测试使用说明。',
+        authorId: normalId,
+        authorName: '测试用户',
+        department: '测试部',
+        status: 'published',
+        recommended: true,
+      })),
+    })
+  }
+  const targetId = `recommend-limit-${suffix}`
+  await prisma.work.create({
+    data: {
+      id: targetId,
+      title: `推荐上限-${suffix}`,
+      type: 'prompt',
+      category: domainName,
+      intro: '用于验证第六个作品不能加入运营推荐。',
+      usage: '用于验证第六个作品不能加入运营推荐的完整说明。',
+      authorId: normalId,
+      authorName: '测试用户',
+      department: '测试部',
+      status: 'published',
+    },
+  })
+  const blocked = await request(`/api/admin/works/${targetId}/recommend`, { method: 'POST', headers: adminHeaders })
+  assert.equal(blocked.status, 400)
+  assert.match((await blocked.json()).error, /最多 5 个/)
+  assert.equal((await prisma.work.findUnique({ where: { id: targetId } })).recommended, false)
+
+  await prisma.work.update({ where: { id: targetId }, data: { recommended: true } })
+  const adminRecommended = await request('/api/admin/works/recommended', { headers: adminHeaders })
+  assert.equal(adminRecommended.status, 200)
+  assert.ok((await adminRecommended.json()).length >= 6)
+
+  const publicRecommended = await request('/api/works/recommended', { headers: adminHeaders })
+  assert.equal(publicRecommended.status, 200)
+  assert.equal((await publicRecommended.json()).length, 5)
+
+  const cancelled = await request(`/api/admin/works/${targetId}/recommend`, { method: 'POST', headers: adminHeaders })
+  assert.equal(cancelled.status, 200)
+  assert.equal((await cancelled.json()).recommended, false)
 })

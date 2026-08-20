@@ -154,6 +154,15 @@ const EMPTY_USER: User = {
 
 // v1.7：后端 API 返回的作品数据 → 前端 Work 类型转换
 // v2.0：导出供 Gallery.tsx 等页面复用，保证数据转换逻辑统一
+function displayBusinessDomainName(value: unknown): string {
+  const name = typeof value === 'string' ? value : ''
+  const prefix = '__archived_domain__:'
+  if (!name.startsWith(prefix)) return name
+  const archivedValue = name.slice(prefix.length)
+  const separatorIndex = archivedValue.indexOf(':')
+  return separatorIndex >= 0 ? archivedValue.slice(separatorIndex + 1) : archivedValue
+}
+
 export function transformWork(raw: any): Work {
   // coreAbilities 后端存为 JSON 字符串，需 parse
   let coreAbilities: string[] = []
@@ -182,6 +191,24 @@ export function transformWork(raw: any): Work {
     baseVersionId: v.baseVersionId,
     candidate: v.candidate,
     current: v.current,
+    title: v.title ?? undefined,
+    type: v.type ?? undefined,
+    category: v.category == null ? undefined : displayBusinessDomainName(v.category),
+    tags: (() => {
+      if (v.tagsJson == null) return undefined
+      try { return Array.isArray(v.tagsJson) ? v.tagsJson : JSON.parse(v.tagsJson) }
+      catch { return undefined }
+    })(),
+    intro: v.intro ?? undefined,
+    usage: v.usage ?? undefined,
+    businessValue: v.businessValue ?? undefined,
+    scene: v.scene ?? undefined,
+    coreAbilities: (() => {
+      if (v.coreAbilities == null) return undefined
+      try { return Array.isArray(v.coreAbilities) ? v.coreAbilities : JSON.parse(v.coreAbilities) }
+      catch { return undefined }
+    })(),
+    coverUrl: v.coverUrl ?? undefined,
     // v2.0：版本级附件（编辑草稿时使用）
     attachments: (v.attachments || []).map((a: any) => ({
       id: a.id,
@@ -196,7 +223,7 @@ export function transformWork(raw: any): Work {
     id: raw.id,
     title: raw.title,
     type: raw.type,
-    category: raw.category || '',
+    category: displayBusinessDomainName(raw.category),
     tags: raw.tags || [],
     intro: raw.intro || '',
     authorId: raw.authorId,
@@ -297,7 +324,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       if (effectivePermissions.includes('admin:workRead')) {
         const data = await apiFetch<{ items: any[]; total: number }>('/admin/works?pageSize=100')
-        setWorks(data.items.map(transformWork))
+        // 后台列表为减小响应体不返回评论。并发进入详情页时保留详情请求已加载的评论，
+        // 避免列表请求后返回把持久化评论覆盖成空数组。
+        setWorks((previous) => {
+          const previousById = new Map(previous.map((work) => [work.id, work]))
+          return data.items.map((raw) => {
+            const transformed = transformWork(raw)
+            const existing = previousById.get(transformed.id)
+            return !Array.isArray(raw.comments) && existing
+              ? { ...transformed, comments: existing.comments }
+              : transformed
+          })
+        })
       } else {
         const [published, own] = await Promise.all([
           apiFetch<{ items: any[]; total: number }>('/works?pageSize=50'),
@@ -740,7 +778,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const rejectVersion = useCallback(async (workId: string, version: string, reason: string): Promise<boolean> => {
     const work = worksRef.current.find((w) => w.id === workId)
     try {
-      await rejectVersionApi(workId, version, reason)
+      const result = await rejectVersionApi(workId, version, reason)
       const now = nowDateTime()
       setWorks((prev) => prev.map((w) => {
         if (w.id !== workId) return w
@@ -752,6 +790,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }))
       fetchEvents()
+      if (result.warning) addToast('info', result.warning)
       if (work) addOperationLog({ module: '审核管理', action: '审核', content: '驳回版本（附修改意见）', target: `${work.title} ${version}` })
       return true
     } catch (err: any) {
@@ -849,7 +888,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           department: comment.department || '',
           avatarColor: comment.avatarColor || '',
           content: comment.content,
-          date: comment.createdAt ? formatDateTime(comment.createdAt) : nowDate(),
+          date: comment.createdAt ? formatDateTime(comment.createdAt) : nowDateTime(),
         }, ...w.comments] }
       }))
       return true
@@ -939,6 +978,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshPermissions()
   }, [refreshPermissions])
+
+  // 权限可能由超级管理员在其他会话中调整。后端会立即按最新配置鉴权，
+  // 前端也在用户切回页面及定时轮询时刷新，避免入口状态长期停留在旧值。
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshPermissions()
+    }
+    const timer = window.setInterval(refreshWhenVisible, 30_000)
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [isAuthenticated, refreshPermissions])
 
   // 权限判断使用服务端返回的实际生效权限
   const hasPermission = useCallback((perm: Permission) => {
@@ -1051,6 +1107,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addDomain = useCallback(async (name: string): Promise<boolean> => {
     const trimmed = name.trim()
     if (!trimmed) return false
+    if (trimmed.length > 20) {
+      addToast('error', '业务领域名称不能超过 20 个字符')
+      return false
+    }
     try {
       await createDomainApi(trimmed)
       await fetchDomains()
@@ -1064,6 +1124,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const renameDomain = useCallback(async (oldName: string, newName: string): Promise<void> => {
     const trimmed = newName.trim()
     if (!trimmed || oldName === trimmed) return
+    if (trimmed.length > 20) {
+      throw new Error('业务领域名称不能超过 20 个字符')
+    }
     try {
       // 查找业务领域的 id
       const adminDomains = await getAdminDomains()
@@ -1100,6 +1163,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addTag = useCallback(async (name: string): Promise<boolean> => {
     const trimmed = name.trim()
     if (!trimmed) return false
+    if (trimmed.length > 30) {
+      addToast('error', '标签名称不能超过 30 个字符')
+      return false
+    }
     try {
       await createTagApi(trimmed)
       await fetchTags()

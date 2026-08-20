@@ -7,39 +7,41 @@ import { authRequired, getEffectivePermissions, requirePermission } from '../lib
 import type { WorkType } from '../types.js'
 import { publishApprovedCandidate } from '../lib/version-service.js'
 import { getUnsafeTagReason } from '../lib/content-filter.js'
+import { ARCHIVED_DOMAIN_PREFIX, displayBusinessDomainName } from '../lib/archived-domain.js'
 
 const router = Router()
-const ARCHIVED_DOMAIN_PREFIX = '__archived_domain__:'
 
 // 作品类型校验
 const WORK_TYPES: WorkType[] = ['skill', 'app', 'agent', 'prompt', 'workflow', 'case']
 
 const createWorkSchema = z.object({
-  title: z.string().trim().min(2, '作品名称至少 2 个字符').max(50),
+  title: z.string().trim().min(2, '作品名称至少 2 个字符').max(50, '作品名称不超过 50 个字符'),
   type: z.enum(WORK_TYPES as [string, ...string[]]),
-  category: z.string().trim().min(1, '业务领域不能为空'),
+  category: z.string().trim().min(1, '业务领域不能为空').max(20, '业务领域不超过 20 个字符'),
   tags: z.array(z.string().trim().min(1).max(30, '单个标签不能超过 30 个字符').refine((tag) => !getUnsafeTagReason(tag), {
     message: '标签包含敏感词、网址、联系方式或危险代码',
   })).min(1, '至少选择 1 个标签').max(5, '最多选择 5 个标签'),
-  intro: z.string().trim().min(10, '作品简介至少 10 个字符').max(100),
-  usage: z.string().trim().min(20, '使用说明至少 20 个字符'),
-  businessValue: z.string().max(500).optional(),
-  scene: z.string().optional(),
-  coreAbilities: z.array(z.string()).optional(),
-  coverUrl: z.string().optional(),
+  intro: z.string().trim().min(10, '作品简介至少 10 个字符').max(100, '作品简介不超过 100 个字符'),
+  usage: z.string().trim().min(20, '使用说明至少 20 个字符').max(2000, '使用说明不超过 2000 个字符'),
+  businessValue: z.string().max(500, '业务价值不超过 500 个字符').optional(),
+  scene: z.string().max(200, '应用场景不超过 200 个字符').optional(),
+  coreAbilities: z.array(
+    z.string().trim().min(1).max(100, '单项核心能力不超过 100 个字符'),
+  ).max(10, '核心能力最多填写 10 项').optional(),
+  coverUrl: z.string().max(2048, '封面地址不超过 2048 个字符').optional(),
   // v1.3：v2 及以上版本必须填写更新说明
-  changelog: z.string().optional(),
+  changelog: z.string().max(500, '版本说明不超过 500 个字符').optional(),
   attachments: z.array(z.object({
-    id: z.string().optional(),
-    name: z.string().min(1),
-    size: z.string().default('0 KB'),
-    url: z.string().min(1),
-    storedName: z.string().min(1),
+    id: z.string().max(128, '附件 ID 过长').optional(),
+    name: z.string().min(1).max(255, '附件名称不超过 255 个字符'),
+    size: z.string().max(32, '附件大小描述过长').default('0 KB'),
+    url: z.string().min(1).max(2048, '附件地址过长'),
+    storedName: z.string().min(1).max(255, '附件存储名称过长'),
   })).default([]),
 })
 
 // 作品详情序列化
-async function serializeWork(workId: string, currentUserId?: string, currentUserRoles: string[] = []) {
+async function serializeWork(workId: string, currentUserId?: string, canManageOthers = false) {
   const work = await prisma.work.findUnique({
     where: { id: workId },
     include: {
@@ -58,7 +60,7 @@ async function serializeWork(workId: string, currentUserId?: string, currentUser
     ? !!(await prisma.userFavorite.findUnique({ where: { userId_workId: { userId: currentUserId, workId } } }))
     : false
 
-  const canManage = work.authorId === currentUserId || currentUserRoles.some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+  const canManage = work.authorId === currentUserId || canManageOthers
   const visibleVersions = canManage ? work.versions : work.versions.filter((version) => version.status === 'passed')
   const current = work.versions.find((version) => version.current)
   // v2.0：work 级附件只返回当前线上版本的附件（供详情页下载展示），
@@ -69,6 +71,7 @@ async function serializeWork(workId: string, currentUserId?: string, currentUser
 
   return {
     ...work,
+    category: displayBusinessDomainName(work.category),
     publishedAt: work.publishedAt || current?.reviewedAt || current?.createdAt || work.createdAt,
     coreAbilities: work.coreAbilities ? JSON.parse(work.coreAbilities) : [],
     tags: work.tags.map((t) => t.name),
@@ -101,6 +104,10 @@ router.get('/', authRequired, async (req, res, next) => {
     }
     if (!['latest', 'likes', 'favorites', 'downloads'].includes(String(sort))) {
       res.status(400).json({ error: '无效的排序方式', code: 'VALIDATION_ERROR' })
+      return
+    }
+    if (typeof q === 'string' && q.trim().length > 50) {
+      res.status(400).json({ error: '搜索关键词不能超过 50 个字符', code: 'VALIDATION_ERROR' })
       return
     }
 
@@ -159,7 +166,7 @@ router.get('/', authRequired, async (req, res, next) => {
       total,
       page: p,
       pageSize: size,
-      totalPages: Math.ceil(total / size),
+      totalPages: Math.max(1, Math.ceil(total / size)),
     })
   } catch (err) {
     next(err)
@@ -226,7 +233,9 @@ router.get('/:id', authRequired, async (req, res, next) => {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManage = rawWork.authorId === req.userId || (req.userRoles || []).some((role) => ['reviewer', 'operator', 'super_admin'].includes(role))
+    const effectivePermissions = await getEffectivePermissions(req.userRoles || [])
+    const canManageOthers = effectivePermissions.includes('admin:workManage')
+    const canManage = rawWork.authorId === req.userId || canManageOthers
     if (rawWork.status !== 'published' && !canManage) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
@@ -235,7 +244,7 @@ router.get('/:id', authRequired, async (req, res, next) => {
     if (rawWork.status === 'published') {
       await prisma.work.update({ where: { id: req.params.id }, data: { views: { increment: 1 } } })
     }
-    const work = await serializeWork(req.params.id, req.userId, req.userRoles)
+    const work = await serializeWork(req.params.id, req.userId, canManageOthers)
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
@@ -359,16 +368,16 @@ router.post('/', authRequired, requirePermission('work:create'), async (req, res
   }
 })
 
-// PUT /api/works/:id —— 更新作品基础信息（仅作者本人）
-router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workManage'), async (req, res, next) => {
+// PUT /api/works/:id —— 更新作品基础信息（作者本人或超级管理员）
+router.put('/:id', authRequired, requirePermission('work:editOwn'), async (req, res, next) => {
   try {
+    const isSuperAdmin = (req.userRoles || []).includes('super_admin')
     const work = await prisma.work.findUnique({ where: { id: req.params.id } })
     if (!work) {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
-    if (work.authorId !== req.userId && !canManageAll) {
+    if (work.authorId !== req.userId && !isSuperAdmin) {
       res.status(403).json({ error: '无权编辑该作品', code: 'FORBIDDEN' })
       return
     }
@@ -407,7 +416,13 @@ router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workMa
       const names = data.attachments.map((item) => item.storedName)
       const [pending, existing] = await Promise.all([
         prisma.pendingUpload.count({ where: { uploaderId: req.userId, storedName: { in: names } } }),
-        prisma.attachment.count({ where: { ...(canManageAll ? {} : { uploaderId: req.userId }), versionId: draft.id, storedName: { in: names } } }),
+        prisma.attachment.count({
+          where: {
+            versionId: draft.id,
+            storedName: { in: names },
+            ...(!isSuperAdmin && { uploaderId: req.userId }),
+          },
+        }),
       ])
       if (pending + existing !== new Set(names).size) {
         res.status(400).json({ error: '附件无效或不属于当前用户', code: 'INVALID_ATTACHMENT' })
@@ -469,7 +484,7 @@ router.put('/:id', authRequired, requirePermission('work:editOwn', 'admin:workMa
       }
     })
 
-    res.json(await serializeWork(work.id, req.userId, req.userRoles))
+    res.json(await serializeWork(work.id, req.userId, isSuperAdmin))
   } catch (err) {
     next(err)
   }
@@ -483,9 +498,12 @@ router.delete('/:id', authRequired, requirePermission('work:deleteOwn', 'admin:w
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    const canManageAll = (await getEffectivePermissions(req.userRoles || [])).includes('admin:workManage')
-    if (work.authorId !== req.userId && !canManageAll) {
+    if (work.authorId !== req.userId) {
       res.status(403).json({ error: '只能删除自己的作品', code: 'FORBIDDEN' })
+      return
+    }
+    if (work.status === 'deleted') {
+      res.status(400).json({ error: '作品已删除，不可重复操作', code: 'BUSINESS_ERROR' })
       return
     }
     await prisma.work.update({ where: { id: req.params.id }, data: { status: 'deleted' } })
@@ -507,6 +525,10 @@ router.post('/:id/offline', authRequired, requirePermission('work:offlineOwn'), 
     const isReviewer = (req.userRoles || []).some((role) => role === 'reviewer' || role === 'super_admin')
     if (!isAuthor && !isReviewer) {
       res.status(403).json({ error: '只能下架自己的作品或由审核管理员强制下架', code: 'FORBIDDEN' })
+      return
+    }
+    if (work.status !== 'published') {
+      res.status(400).json({ error: work.status === 'deleted' ? '作品已删除，禁止操作' : '只有已发布作品可以下架', code: 'BUSINESS_ERROR' })
       return
     }
     await prisma.work.update({ where: { id: req.params.id }, data: { status: 'offline' } })

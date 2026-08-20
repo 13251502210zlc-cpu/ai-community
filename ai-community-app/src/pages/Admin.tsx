@@ -7,9 +7,9 @@ import {
   Search, Filter, Save, RotateCcw, Lock, Key, Eye, EyeOff,
   ChevronLeft, ChevronRight, ArrowUpCircle, ArrowDownCircle, Download,
 } from 'lucide-react'
-import { useApp } from '../store/AppStore'
-import { downloadAttachmentFile, getReviewQueue, getReviewStats, getOperationLogs, exportOperationLogs, getPermissionMatrix, updatePermissionMatrix } from '../lib/api'
-import type { OperationLogItem } from '../lib/api'
+import { transformWork, useApp } from '../store/AppStore'
+import { downloadAttachmentFile, getReviewQueue, getReviewStats, getAdminStats, getOperationLogs, exportOperationLogs, getPermissionMatrix, updatePermissionMatrix, getAdminRecommendedWorks, getAdminWorks } from '../lib/api'
+import type { AdminStatsResult, OperationLogItem } from '../lib/api'
 import { TYPE_CONFIG, ROLE_CONFIG, ROLE_PERMISSIONS, hasRole as checkRole, ALL_ROLES } from '../types'
 import type { Permission, UserRole, Work, WorkVersion, User, LoginMethod, AccountStatus, WorkType, WorkStatus } from '../types'
 import { TypeTag, VersionStatusBadge, Avatar, WorkStatusBadge } from '../components/Tags'
@@ -114,9 +114,8 @@ const PERMISSION_DEFINITIONS: Array<{
   { permission: 'review:view', group: '审核管理', label: '查看审核队列', desc: '查看待审核版本及审核记录' },
   { permission: 'review:approve', group: '审核管理', label: '审核通过版本', desc: '批准待审核版本' },
   { permission: 'review:reject', group: '审核管理', label: '驳回版本', desc: '驳回待审核版本并填写原因' },
-  { permission: 'review:forceOffline', group: '审核管理', label: '强制下架违规作品', desc: '内容治理权限' },
   { permission: 'admin:workRead', group: '后台管理', label: '查看全部状态作品', desc: '查看草稿、待审、已下架及已删除作品' },
-  { permission: 'admin:workManage', group: '后台管理', label: '管理任意作品', desc: '上架、下架、编辑或删除任意作品' },
+  { permission: 'admin:workManage', group: '后台管理', label: '管理任意作品', desc: '上架、下架或删除任意作品；超级管理员可编辑任意作品' },
   { permission: 'admin:domain', group: '后台管理', label: '业务领域管理', desc: '新增、修改和删除业务领域' },
   { permission: 'admin:tag', group: '后台管理', label: '标签管理', desc: '新增和删除标签' },
   { permission: 'admin:user', group: '后台管理', label: '用户管理 / 角色查看', desc: '查看用户及配置账号' },
@@ -158,7 +157,11 @@ function PermissionMatrix({
     getPermissionMatrix()
       .then((data) => {
         if (!active) return
-        setMatrix(data)
+        setMatrix({
+          ...data,
+          // 超级管理员为系统全权限角色，不受数据库配置影响。
+          super_admin: [...ROLE_PERMISSIONS.super_admin],
+        })
         setDirty(false)
       })
       .catch((err: Error) => {
@@ -191,7 +194,7 @@ function PermissionMatrix({
       )
       await refreshPermissions()
       setDirty(false)
-      addToast('success', '权限配置已保存到数据库并立即生效')
+      addToast('success', '权限配置已保存并立即生效；其他用户切回页面或刷新后会同步操作入口')
     } catch (err: any) {
       addToast('error', err.message || '保存失败，请重试')
     } finally {
@@ -234,7 +237,7 @@ function PermissionMatrix({
         <div>
           <h2 className="text-base font-bold mb-1">权限配置矩阵</h2>
           <p className="text-xs text-muted-foreground">
-            权限配置直接读取并写入服务端数据库；“仅自己”由对应权限码的资源归属规则决定。
+            点击单元格后需保存才会生效；“仅自己”由对应权限码的资源归属规则决定。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -269,28 +272,37 @@ function PermissionMatrix({
         <span className="text-muted-foreground hidden sm:inline">点击单元格可循环切换</span>
       </div>
 
+      <div className="rounded-lg p-3 text-xs" style={{ backgroundColor: 'var(--state-warning-bg)', color: 'var(--state-warning)' }}>
+        当前超级管理员账号始终拥有系统全部权限，不能用来验证普通角色的禁用效果。普通用户同时拥有“普通用户、创作者”等多个角色时权限取并集，需在其所有角色列中关闭同一权限后再用该用户验证。
+      </div>
+
       <div className="rounded-xl border bg-card p-4 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           {ROLE_COLS.map((r) => (
             <div key={r} className="rounded-lg p-2.5 text-center" style={{ backgroundColor: ROLE_CONFIG[r].badgeBg }}>
               <div className="text-sm font-bold">{ROLE_CONFIG[r].label}</div>
               <div className="text-[10px] text-muted-foreground mt-0.5 mb-2">{ROLE_CONFIG[r].badge}</div>
-              <div className="flex items-center justify-center gap-1">
-                <button
-                  onClick={() => handleSetColumn(r, 'yes')}
-                  disabled={r === 'super_admin'}
-                  className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
+              {r === 'super_admin' ? (
+                <span
+                  className="inline-flex text-[10px] px-2 py-0.5 rounded-full font-medium"
                   style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}
-                  title="整列设为有权限"
-                >全有</button>
-                <button
-                  onClick={() => handleSetColumn(r, 'no')}
-                  disabled={r === 'super_admin'}
-                  className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
-                  style={{ backgroundColor: 'var(--aic-surface-elevated)', color: 'var(--aic-muted-foreground)' }}
-                  title="整列清空（基础权限除外）"
-                >清空</button>
-              </div>
+                >系统全权限</span>
+              ) : (
+                <div className="flex items-center justify-center gap-1">
+                  <button
+                    onClick={() => handleSetColumn(r, 'yes')}
+                    className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
+                    style={{ backgroundColor: 'var(--state-success-bg)', color: 'var(--state-success)' }}
+                    title="整列设为有权限"
+                  >全有</button>
+                  <button
+                    onClick={() => handleSetColumn(r, 'no')}
+                    className="text-[10px] px-1.5 py-0.5 rounded transition hover:opacity-80"
+                    style={{ backgroundColor: 'var(--aic-surface-elevated)', color: 'var(--aic-muted-foreground)' }}
+                    title="整列清空（基础权限除外）"
+                  >清空</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -329,7 +341,9 @@ function PermissionMatrix({
                         <td key={r} className="p-3 text-center">
                           <div className="flex justify-center">
                             <PermCell
-                              value={matrix[r]?.includes(row.permission) ? (row.own ? 'own' : 'yes') : 'no'}
+                              value={r === 'super_admin'
+                                ? 'yes'
+                                : matrix[r]?.includes(row.permission) ? (row.own ? 'own' : 'yes') : 'no'}
                               editable={r !== 'super_admin'}
                               onChange={(next) => handleCellChange(
                                 row.permission,
@@ -354,9 +368,25 @@ function PermissionMatrix({
         <Info size={14} className="mt-0.5 flex-shrink-0" />
         <span>
           超级管理员可调整普通用户、创作者、审核管理员和运营管理员的权限；超级管理员权限为系统保护项，不允许修改。
-          保存后配置将写入数据库，并由后端鉴权中间件立即读取执行。
+          保存后配置将写入数据库，并由后端鉴权中间件立即读取执行。用户同时拥有多个角色时权限取并集；
+          如需关闭某项权限，必须在该用户拥有的所有角色中都关闭该权限。
         </span>
       </div>
+
+      {dirty && (
+        <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-xl border bg-card px-4 py-3 shadow-xl">
+          <span className="text-sm font-medium" style={{ color: 'var(--state-warning)' }}>权限修改尚未生效</span>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            style={{ background: 'linear-gradient(135deg, var(--aic-primary), var(--aic-gradient-violet))' }}
+          >
+            <Save size={13} /> {saving ? '保存中…' : '保存并立即生效'}
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -394,6 +424,10 @@ function DomainManagement({
       addToast('error', '业务领域名称不能为空')
       return
     }
+    if (newName.trim().length > 20) {
+      addToast('error', '业务领域名称不能超过 20 个字符')
+      return
+    }
     const ok = await addDomain(newName)
     if (ok) {
       addToast('success', `业务领域「${newName.trim()}」已添加`)
@@ -412,6 +446,10 @@ function DomainManagement({
     if (!editing) return
     if (!editName.trim()) {
       addToast('error', '业务领域名称不能为空')
+      return
+    }
+    if (editName.trim().length > 20) {
+      addToast('error', '业务领域名称不能超过 20 个字符')
       return
     }
     if (editName.trim() !== editing && domains.includes(editName.trim())) {
@@ -445,7 +483,7 @@ function DomainManagement({
     <div className="space-y-4 animate-fade-in">
       <div>
         <h2 className="text-base font-bold mb-1">业务领域管理</h2>
-        <p className="text-xs text-muted-foreground">管理作品大厅的业务领域筛选项。删除前需确保该领域下无作品。</p>
+        <p className="text-xs text-muted-foreground">管理作品大厅的业务领域筛选项，名称不超过 20 个字符。删除前需确保该领域下无作品。</p>
       </div>
       <div className="rounded-xl border bg-card p-5 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
         {/* 新增 */}
@@ -453,9 +491,10 @@ function DomainManagement({
           <input
             type="text"
             value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            onChange={(e) => setNewName(e.target.value.slice(0, 20))}
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
-            placeholder="输入新业务领域名称..."
+            placeholder="输入新业务领域名称（不超过20字）..."
+            maxLength={20}
             className="h-9 flex-1 max-w-xs rounded-md border px-3 text-sm outline-none focus:ring-2"
             style={{ borderColor: 'var(--aic-border-solid)' }}
           />
@@ -489,17 +528,18 @@ function DomainManagement({
                         <input
                           type="text"
                           value={editName}
-                          onChange={(e) => setEditName(e.target.value)}
+                          onChange={(e) => setEditName(e.target.value.slice(0, 20))}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') handleSaveEdit()
                             if (e.key === 'Escape') setEditing(null)
                           }}
                           autoFocus
+                          maxLength={20}
                           className="h-8 rounded border px-2 text-sm outline-none focus:ring-2"
                           style={{ borderColor: 'var(--aic-primary)' }}
                         />
                       ) : (
-                        domain
+                        <span className="block min-w-0 max-w-full break-words [overflow-wrap:anywhere]">{domain}</span>
                       )}
                     </td>
                     <td className="p-2.5">
@@ -590,6 +630,10 @@ function TagManagement({
       addToast('error', '标签名称不能为空')
       return
     }
+    if (newName.trim().length > 30) {
+      addToast('error', '标签名称不能超过 30 个字符')
+      return
+    }
     const ok = await addTag(newName)
     if (ok) {
       addToast('success', `标签「${newName.trim()}」已添加`)
@@ -622,9 +666,10 @@ function TagManagement({
           <input
             type="text"
             value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            onChange={(e) => setNewName(e.target.value.slice(0, 30))}
             onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
             placeholder="输入新标签名称..."
+            maxLength={30}
             className="h-9 flex-1 max-w-xs rounded-md border px-3 text-sm outline-none focus:ring-2"
             style={{ borderColor: 'var(--aic-border-solid)' }}
           />
@@ -697,23 +742,29 @@ function TagManagement({
 }
 
 export default function Admin() {
-  const { works, users, toggleRecommend, currentUser, addToast, approveVersion, rejectVersion, domains, tags, addDomain, renameDomain, deleteDomain, addTag, deleteTag, hasPermission, refreshPermissions } = useApp()
+  const { works, toggleRecommend, currentUser, addToast, approveVersion, rejectVersion, domains, tags, addDomain, renameDomain, deleteDomain, addTag, deleteTag, hasPermission, refreshPermissions } = useApp()
   const [activeNav, setActiveNav] = useState<NavId>('review')
 
   // v1.9：审核队列与统计从后端 API 拉取，替代直接从 works 过滤
   const [reviewQueue, setReviewQueue] = useState<ReviewItem[]>([])
   const [reviewStats, setReviewStats] = useState<{ pending: number; approvedToday: number; rejectedToday: number; totalWorks: number } | null>(null)
+  const [platformStats, setPlatformStats] = useState<AdminStatsResult | null>(null)
+  const [recommendedWorks, setRecommendedWorks] = useState<Work[]>([])
+  const [recommendedLoading, setRecommendedLoading] = useState(false)
 
   const publishedWorks = works.filter((w) => w.status === 'published')
-  const totalWorks = works.length
-  const totalUsers = users.length
-  const totalDownloads = publishedWorks.reduce((sum, w) => sum + w.downloads, 0)
+  const totalWorks = platformStats?.summary.totalWorks ?? 0
+  const totalUsers = platformStats?.summary.totalUsers ?? 0
+  const totalDownloads = platformStats?.summary.totalDownloads ?? 0
   // v1.3：已删除作品的待审核版本不计入待审核数量
   const pendingCount = works.reduce((sum, w) => w.status === 'deleted' ? sum : sum + w.versions.filter((v) => v.status === 'pending').length, 0)
-  const recommended = publishedWorks.filter((w) => w.recommended)
+  // 推荐位必须使用服务端的全量权威结果。后台作品列表仅加载最新 100 条，
+  // 不能据此推算推荐数量，否则较旧的推荐作品会在页面上“消失”。
+  const recommended = recommendedWorks
 
   // v1.7：基于多角色权限并集判断
   const userRoles = currentUser.roles || []
+  const isSuperAdmin = userRoles.includes('super_admin')
   const canConfigPerm = hasPermission('admin:role')
   // v1.3：作品审核需要审核管理员或超级管理员（运营管理员不再有审核权限）
   const canReview = hasPermission('review:view')
@@ -731,11 +782,12 @@ export default function Admin() {
   const canExportOpLog = checkRole(userRoles, 'super_admin')
 
   const typeStats = (Object.keys(TYPE_CONFIG) as (keyof typeof TYPE_CONFIG)[]).map((type) => {
-    const count = publishedWorks.filter((w) => w.type === type).length
-    return { type, count, percent: totalWorks > 0 ? Math.round((count / publishedWorks.length) * 100) : 0 }
+    const count = platformStats?.typeDistribution.find((item) => item.type === type)?.count ?? 0
+    const publishedTotal = platformStats?.publishedWorks ?? 0
+    return { type, count, percent: publishedTotal > 0 ? Math.round((count / publishedTotal) * 100) : 0 }
   })
 
-  const topWorks = [...publishedWorks].sort((a, b) => b.downloads - a.downloads).slice(0, 5)
+  const topWorks = platformStats?.topWorks ?? []
 
   // 拉取审核队列与统计
   const refreshReview = useCallback(async () => {
@@ -755,13 +807,43 @@ export default function Admin() {
     }
   }, [canReview, activeNav, refreshReview])
 
+  useEffect(() => {
+    if (canViewStats && activeNav === 'stats') {
+      getAdminStats().then(setPlatformStats).catch((error) => {
+        setPlatformStats(null)
+        addToast('error', error instanceof Error ? error.message : '统计数据加载失败')
+      })
+    }
+  }, [activeNav, addToast, canViewStats])
+
+  const refreshRecommended = useCallback(async () => {
+    setRecommendedLoading(true)
+    try {
+      const items = await getAdminRecommendedWorks()
+      setRecommendedWorks(items.map(transformWork))
+    } catch (error) {
+      setRecommendedWorks([])
+      addToast('error', error instanceof Error ? error.message : '推荐作品加载失败')
+    } finally {
+      setRecommendedLoading(false)
+    }
+  }, [addToast])
+
+  useEffect(() => {
+    if (canRecommend && activeNav === 'recommend') {
+      refreshRecommended()
+    }
+  }, [activeNav, canRecommend, refreshRecommended])
+
   const handleToggleRecommend = async (id: string, title: string) => {
-    if (!works.find((w) => w.id === id)?.recommended && recommended.length >= 5) {
+    const wasRecommended = recommended.some((work) => work.id === id)
+    if (!wasRecommended && recommended.length >= 5) {
       addToast('error', '推荐位最多 5 个，请先取消其他推荐')
       return
     }
     if (await toggleRecommend(id)) {
-      addToast('success', works.find((w) => w.id === id)?.recommended ? `已取消「${title}」推荐` : `已推荐「${title}」`)
+      await refreshRecommended()
+      addToast('success', wasRecommended ? `已取消「${title}」推荐` : `已推荐「${title}」`)
     }
   }
 
@@ -822,7 +904,11 @@ export default function Admin() {
         <div className="flex-1 min-w-0">
           {/* v1.5：作品管理 - 统一的作品列表入口 */}
           {activeNav === 'works' && (
-            <WorkManagement canReadWorks={canReadWorks} canManageWorks={canManageWorks} />
+            <WorkManagement
+              canReadWorks={canReadWorks}
+              canManageWorks={canManageWorks}
+              canEditAnyWork={isSuperAdmin}
+            />
           )}
 
           {/* 作品审核 - 内嵌审核管理 */}
@@ -899,14 +985,17 @@ export default function Admin() {
                     </button>
                   </div>
                 ))}
-                {recommended.length === 0 && (
+                {recommendedLoading && (
+                  <p className="text-sm text-muted-foreground text-center py-6">推荐作品加载中...</p>
+                )}
+                {!recommendedLoading && recommended.length === 0 && (
                   <p className="text-sm text-muted-foreground text-center py-6">暂无推荐作品</p>
                 )}
               </div>
               <div className="rounded-xl border bg-card p-5 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
                 <h3 className="text-sm font-bold mb-3">添加推荐作品</h3>
                 <div className="space-y-2">
-                  {publishedWorks.filter((w) => !w.recommended).slice(0, 8).map((w) => (
+                  {publishedWorks.filter((w) => !recommended.some((item) => item.id === w.id)).slice(0, 8).map((w) => (
                     <div key={w.id} className="flex items-center justify-between py-1.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <TypeTag type={w.type} size="sm" />
@@ -960,14 +1049,15 @@ export default function Admin() {
               </div>
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard label="累计作品" value={totalWorks} change="+12" color="var(--aic-primary)" />
-                <StatCard label="注册用户" value={totalUsers} change="+3" color="var(--aic-gradient-violet)" />
-                <StatCard label="总下载量" value={totalDownloads} change="+236" color="var(--state-success)" />
-                <StatCard label="待审核版本" value={pendingCount} change={pendingCount > 0 ? '需及时处理' : '已清空'} color="var(--state-warning)" danger={pendingCount > 0} />
+                <StatCard label="累计作品" value={totalWorks} change="不含已删除作品" color="var(--aic-primary)" />
+                <StatCard label="注册用户" value={totalUsers} change="全部注册账号" color="var(--aic-gradient-violet)" />
+                <StatCard label="总下载量" value={totalDownloads} change="已发布作品累计" color="var(--state-success)" />
+                <StatCard label="待审核版本" value={platformStats?.summary.pendingVersions ?? 0} change={(platformStats?.summary.pendingVersions ?? 0) > 0 ? '需及时处理' : '已清空'} color="var(--state-warning)" danger={(platformStats?.summary.pendingVersions ?? 0) > 0} />
               </div>
 
               <div className="rounded-xl border bg-card p-5 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
-                <h3 className="text-sm font-bold mb-4">作品类型分布</h3>
+                <h3 className="text-sm font-bold mb-1">作品类型分布</h3>
+                <p className="text-xs text-muted-foreground mb-4">统计范围：已发布作品，共 {platformStats?.publishedWorks ?? 0} 个</p>
                 <div className="space-y-3">
                   {typeStats.map((s) => (
                     <div key={s.type}>
@@ -1090,6 +1180,10 @@ function ReviewPanel({
     if (!selected) return
     if (rejectReason.trim().length < 20) {
       addToast('error', '驳回修改意见不少于 20 字')
+      return
+    }
+    if (rejectReason.trim().length > 200) {
+      addToast('error', '驳回修改意见不能超过 200 字')
       return
     }
     const { work, version } = selected
@@ -1244,24 +1338,24 @@ function ReviewPanel({
 
           <div className="mb-3">
             <div className="text-xs font-semibold mb-1">作品简介</div>
-            <div className="text-sm text-muted-foreground">{selected.work.intro}</div>
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.work.intro}</div>
           </div>
 
           <div className="mb-3">
             <div className="text-xs font-semibold mb-1">使用说明</div>
-            <div className="text-sm text-muted-foreground whitespace-pre-wrap">{selected.work.usage}</div>
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.work.usage}</div>
           </div>
 
           {selected.work.businessValue && (
             <div className="mb-3">
               <div className="text-xs font-semibold mb-1">业务价值</div>
-              <div className="text-sm text-muted-foreground">{selected.work.businessValue}</div>
+              <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.work.businessValue}</div>
             </div>
           )}
 
           <div className="mb-4">
             <div className="text-xs font-semibold mb-1">版本更新内容</div>
-            <div className="text-sm text-muted-foreground">{selected.version.changelog}</div>
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.version.changelog}</div>
           </div>
 
           <div className="mb-4">
@@ -1321,17 +1415,18 @@ function ReviewPanel({
               <div className="animate-fade-in">
                 <label className="block text-xs font-semibold mb-1.5">
                   驳回修改意见 <span style={{ color: 'var(--state-danger)' }}>*</span>
-                  <span className="font-normal text-muted-foreground">（不少于 20 字）</span>
+                  <span className="font-normal text-muted-foreground">（20-200 字）</span>
                 </label>
                 <textarea
                   value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
+                  onChange={(e) => setRejectReason(e.target.value.slice(0, 200))}
                   placeholder="请详细说明需要修改的内容，帮助作者理解问题..."
+                  maxLength={200}
                   rows={3}
-                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 resize-y"
+                  className="w-full rounded-md border px-3 py-2 text-sm outline-none focus:ring-2 resize-y whitespace-pre-wrap break-all"
                   style={{ borderColor: 'var(--aic-border-solid)' }}
                 />
-                <div className="text-right text-xs text-muted-foreground mt-1">{rejectReason.length} 字</div>
+                <div className="text-right text-xs text-muted-foreground mt-1">{rejectReason.length}/200 字</div>
                 <div className="flex justify-end gap-2 mt-2">
                   <button
                     onClick={() => { setShowReject(false); setRejectReason('') }}
@@ -1889,10 +1984,18 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
 }
 
 // ============ 作品管理面板（v1.5：统一的作品列表入口） ============
-function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolean; canManageWorks: boolean }) {
+function WorkManagement({
+  canReadWorks,
+  canManageWorks,
+  canEditAnyWork,
+}: {
+  canReadWorks: boolean
+  canManageWorks: boolean
+  canEditAnyWork: boolean
+}) {
   const navigate = useNavigate()
   const {
-    works, addToast,
+    addToast,
     offlineWork, onlineWork,
     batchOfflineWorks, batchOnlineWorks, batchDeleteWorks,
   } = useApp()
@@ -1902,43 +2005,54 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const pageSize = 10
+  const [pageWorks, setPageWorks] = useState<Work[]>([])
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [loading, setLoading] = useState(false)
+  const [stats, setStats] = useState({ total: 0, published: 0, offline: 0, deleted: 0, unpublished: 0 })
 
-  // 统计：按作品状态分组
-  const stats = useMemo(() => ({
-    total: works.length,
-    published: works.filter((w) => w.status === 'published').length,
-    offline: works.filter((w) => w.status === 'offline').length,
-    deleted: works.filter((w) => w.status === 'deleted').length,
-    unpublished: works.filter((w) => w.status === 'unpublished').length,
-  }), [works])
-
-  // 筛选：包含所有状态（已发布/已下架/已删除/未发布）
-  const filteredWorks = useMemo(() => {
-    return works
-      .filter((w) => {
-        if (typeFilter !== 'all' && w.type !== typeFilter) return false
-        if (statusFilter !== 'all' && w.status !== statusFilter) return false
-        if (search.trim()) {
-          const q = search.trim().toLowerCase()
-          if (!w.title.toLowerCase().includes(q) && !w.authorName.toLowerCase().includes(q)) return false
-        }
-        return true
+  const loadAdminWorks = useCallback(async () => {
+    if (!canReadWorks) return
+    setLoading(true)
+    try {
+      const result = await getAdminWorks({
+        page,
+        pageSize,
+        status: statusFilter,
+        type: typeFilter,
+        q: search,
       })
-      .sort((a, b) => (b.publishedAt || b.createdAt).localeCompare(a.publishedAt || a.createdAt))
-  }, [works, search, typeFilter, statusFilter])
+      const nextTotalPages = Math.max(1, result.totalPages)
+      setStats(result.stats)
+      setTotal(result.total)
+      setTotalPages(nextTotalPages)
+      if (page > nextTotalPages) {
+        setPage(nextTotalPages)
+        return
+      }
+      setPageWorks(result.items.map(transformWork))
+    } catch (error) {
+      setPageWorks([])
+      addToast('error', error instanceof Error ? error.message : '作品列表加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [addToast, canReadWorks, page, search, statusFilter, typeFilter])
 
-  // 分页
-  const totalPages = Math.max(1, Math.ceil(filteredWorks.length / pageSize))
-  const currentPage = Math.min(page, totalPages)
-  const pageWorks = filteredWorks.slice((currentPage - 1) * pageSize, currentPage * pageSize)
-  const pageStart = filteredWorks.length === 0 ? 0 : (currentPage - 1) * pageSize + 1
-  const pageEnd = Math.min(currentPage * pageSize, filteredWorks.length)
+  useEffect(() => {
+    const timer = window.setTimeout(loadAdminWorks, search.trim() ? 250 : 0)
+    return () => window.clearTimeout(timer)
+  }, [loadAdminWorks])
+
+  const currentPage = page
+  const pageStart = total === 0 ? 0 : (currentPage - 1) * pageSize + 1
+  const pageEnd = Math.min(currentPage * pageSize, total)
 
   // 筛选条件变化时重置到第 1 页
   useEffect(() => { setPage(1) }, [search, typeFilter, statusFilter])
 
   // 全选（仅当前页）
-  const pageIds = pageWorks.map((w) => w.id)
+  const pageIds = pageWorks.filter((w) => w.status !== 'deleted').map((w) => w.id)
   const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id))
   const toggleAll = () => {
     if (allSelected) {
@@ -1972,7 +2086,10 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     if (reason === null) return
     if (reason.trim().length < 5) { addToast('error', '强制下架原因至少 5 个字符'); return }
     const ok = await offlineWork(work.id, reason.trim())
-    if (ok) addToast('success', `已下架《${work.title}》`)
+    if (ok) {
+      addToast('success', `已下架《${work.title}》`)
+      await loadAdminWorks()
+    }
   }
 
   // 行操作：上架
@@ -1984,7 +2101,10 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     }
     if (!window.confirm(`确认上架《${work.title}》？上架后作品重新在大厅展示。`)) return
     const ok = await onlineWork(work.id)
-    if (ok) addToast('success', `已上架《${work.title}》`)
+    if (ok) {
+      addToast('success', `已上架《${work.title}》`)
+      await loadAdminWorks()
+    }
   }
 
   // 行操作：删除（软删除）
@@ -1998,13 +2118,17 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     const count = await batchDeleteWorks([work.id])
     if (count > 0) addToast('success', `已删除《${work.title}》`)
     if (count > 0) setSelectedIds((prev) => prev.filter((id) => id !== work.id))
+    if (count > 0) await loadAdminWorks()
   }
 
-  // 行操作：编辑（生成新版本走审核流程）— 直接进入作品编辑页
+  // 超级管理员可编辑任意未删除作品，修改内容仍生成新版本并进入审核流程。
   const handleEdit = (work: Work) => {
-    if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
+    if (!canEditAnyWork) {
+      addToast('error', '仅超级管理员可编辑其他用户的作品')
+      return
+    }
     if (work.status === 'deleted') {
-      addToast('error', '已删除作品不可编辑')
+      addToast('info', '已删除作品不可编辑')
       return
     }
     navigate(`/publish?edit=${encodeURIComponent(work.id)}`)
@@ -2020,6 +2144,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     const count = await batchOfflineWorks(selectedIds, reason.trim())
     if (count > 0) addToast('success', `已下架 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
+    if (count > 0) await loadAdminWorks()
   }
   const handleBatchOnline = async () => {
     if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
@@ -2028,6 +2153,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     const count = await batchOnlineWorks(selectedIds)
     if (count > 0) addToast('success', `已上架 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
+    if (count > 0) await loadAdminWorks()
   }
   const handleBatchDelete = async () => {
     if (!canManageWorks) { addToast('error', '没有作品管理权限'); return }
@@ -2036,6 +2162,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
     const count = await batchDeleteWorks(selectedIds)
     if (count > 0) addToast('success', `已删除 ${count} 个作品`)
     if (count > 0) setSelectedIds([])
+    if (count > 0) await loadAdminWorks()
   }
 
   // 状态徽章（使用 Tags 组件）
@@ -2092,8 +2219,9 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索作品名称、作者、关键词..."
+              onChange={(e) => setSearch(e.target.value.slice(0, 50))}
+              placeholder="搜索作品名称、作者、作品简介..."
+              maxLength={50}
               className="h-10 w-full rounded-md border pl-9 pr-3 text-sm outline-none focus:ring-2"
               style={{ borderColor: 'var(--aic-border-solid)' }}
             />
@@ -2125,7 +2253,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
             </select>
           </div>
         </div>
-        <div className="text-xs text-muted-foreground mt-2">共 {filteredWorks.length} / {works.length} 个作品</div>
+        <div className="text-xs text-muted-foreground mt-2">共 {total} / {stats.total} 个作品</div>
       </div>
 
       {/* 批量操作栏 */}
@@ -2166,7 +2294,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">第 {pageStart}-{pageEnd} 条，共 {filteredWorks.length} 条</span>
+        <span className="text-xs text-muted-foreground">第 {pageStart}-{pageEnd} 条，共 {total} 条</span>
       </div>
 
       {/* 作品列表表格 */}
@@ -2250,14 +2378,15 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
                         )}
                         {!isDeleted && (
                           <>
-                            <button
-                              onClick={() => handleEdit(w)}
-                              disabled={!canManageWorks}
-                              className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:border-primary hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
-                              style={{ borderColor: 'var(--aic-border-solid)' }}
-                            >
-                              <Pencil size={11} /> 编辑
-                            </button>
+                            {canEditAnyWork && (
+                              <button
+                                onClick={() => handleEdit(w)}
+                                className="inline-flex items-center gap-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80"
+                                style={{ borderColor: 'var(--aic-primary)', color: 'var(--aic-primary)' }}
+                              >
+                                <Pencil size={11} /> 编辑
+                              </button>
+                            )}
                             <button
                               onClick={() => handleDelete(w)}
                               disabled={!canManageWorks}
@@ -2273,7 +2402,14 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
                   </tr>
                 )
               })}
-              {pageWorks.length === 0 && (
+              {loading && (
+                <tr>
+                  <td colSpan={10} className="p-8 text-center text-muted-foreground text-sm">
+                    作品列表加载中...
+                  </td>
+                </tr>
+              )}
+              {!loading && pageWorks.length === 0 && (
                 <tr>
                   <td colSpan={10} className="p-8 text-center text-muted-foreground text-sm">
                     没有符合条件的作品
@@ -2336,7 +2472,7 @@ function WorkManagement({ canReadWorks, canManageWorks }: { canReadWorks: boolea
         <span>
           <strong>作品管理说明：</strong>
           下架后作品从大厅移除但数据保留，可随时上架；删除为软删除（数据归档保留，不可恢复）；
-          编辑会生成新版本走审核流程，需在作品详情页完善内容并提交审核。已删除作品不可再操作。
+          普通后台管理员不可代替作者编辑或提交版本；超级管理员可编辑任意未删除作品，修改内容仍按新版本进入审核流程。已删除作品不可再操作。
         </span>
       </div>
     </div>
@@ -2393,6 +2529,22 @@ const LOG_ACTION_STYLE: Record<string, { bg: string; color: string }> = {
   '上架/下架': { bg: 'rgba(245,158,11,0.1)', color: '#d97706' },
   '登录/登出': { bg: 'rgba(107,114,128,0.12)', color: 'var(--aic-muted-foreground)' },
   '角色分配': { bg: 'rgba(124,58,237,0.1)', color: '#7c3aed' },
+}
+
+function HighlightMatch({ text, keyword }: { text: string; keyword: string }) {
+  const value = String(text || '')
+  const term = keyword.trim()
+  if (!term) return <>{value}</>
+  const compactValue = value.replace(/[\/／]/g, '').toLowerCase()
+  const compactTerm = term.replace(/[\/／]/g, '').toLowerCase()
+  if (!value.toLowerCase().includes(term.toLowerCase()) && compactTerm && compactValue.includes(compactTerm)) {
+    return <mark className="rounded px-0.5 bg-yellow-200 text-inherit">{value}</mark>
+  }
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const parts = value.split(new RegExp(`(${escaped})`, 'gi'))
+  return <>{parts.map((part, index) => part.toLowerCase() === term.toLowerCase()
+    ? <mark key={`${part}-${index}`} className="rounded px-0.5 bg-yellow-200 text-inherit">{part}</mark>
+    : part)}</>
 }
 
 function OperationLogPanel({
@@ -2478,7 +2630,7 @@ function OperationLogPanel({
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `操作日志_${nowDate()}.csv`
+      a.download = `操作日志_${nowDate().replaceAll('/', '-')}.csv`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -2623,17 +2775,17 @@ function OperationLogPanel({
                     <td className="p-3 text-xs text-muted-foreground whitespace-nowrap font-mono">{l.id.slice(-8)}</td>
                     <td className="p-3 text-xs whitespace-nowrap">{l.time}</td>
                     <td className="p-3 whitespace-nowrap">
-                      <div className="text-xs font-medium">{l.operatorName} · {l.department}</div>
+                      <div className="text-xs font-medium"><HighlightMatch text={l.operatorName} keyword={debouncedKeyword} /> · <HighlightMatch text={l.department} keyword={debouncedKeyword} /></div>
                       <div className="text-[10px] text-muted-foreground mt-0.5">{l.role}</div>
                     </td>
                     <td className="p-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium" style={{ backgroundColor: modStyle.bg, color: modStyle.color }}>{l.module}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium" style={{ backgroundColor: modStyle.bg, color: modStyle.color }}><HighlightMatch text={l.module} keyword={debouncedKeyword} /></span>
                     </td>
                     <td className="p-3 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium" style={{ backgroundColor: actStyle.bg, color: actStyle.color }}>{l.action}</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium" style={{ backgroundColor: actStyle.bg, color: actStyle.color }}><HighlightMatch text={l.action} keyword={debouncedKeyword} /></span>
                     </td>
-                    <td className="p-3 text-xs">{l.content}</td>
-                    <td className="p-3 text-xs text-muted-foreground">{l.target}</td>
+                    <td className="p-3 text-xs"><HighlightMatch text={l.content} keyword={debouncedKeyword} /></td>
+                    <td className="p-3 text-xs text-muted-foreground"><HighlightMatch text={l.target} keyword={debouncedKeyword} /></td>
                     <td className="p-3 text-xs text-muted-foreground whitespace-nowrap font-mono">{l.ip}</td>
                     <td className="p-3 whitespace-nowrap">
                       <span

@@ -19,7 +19,7 @@ const TABS = [
 export default function Detail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { works, currentUser, refreshWork, toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, addToast } = useApp()
+  const { works, worksLoading, currentUser, refreshWork, toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, addToast, hasPermission } = useApp()
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('intro')
   const [comment, setComment] = useState('')
   const [viewCounted, setViewCounted] = useState(false)
@@ -27,10 +27,10 @@ export default function Detail() {
 
   const work = works.find((w) => w.id === id)
 
-  // 每次进入或切换详情页都从服务端刷新，确保点赞/收藏高亮不依赖列表或管理端缓存。
+  // 等全局列表加载完成后再取详情，避免管理员作品列表的精简响应覆盖评论、点赞和收藏状态。
   useEffect(() => {
-    if (id) void refreshWork(id)
-  }, [id, refreshWork])
+    if (id && !worksLoading) void refreshWork(id)
+  }, [id, worksLoading, refreshWork])
 
   useEffect(() => {
     if (work && !viewCounted) {
@@ -255,7 +255,7 @@ export default function Detail() {
           >
             <Share2 size={15} /> 分享
           </button>
-          {isAuthor && (
+          {isAuthor && hasPermission('work:editOwn') && (
             <Link
               to={`/publish?edit=${work.id}`}
               className="inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-sm font-medium transition hover:bg-muted"
@@ -289,13 +289,13 @@ export default function Detail() {
       <div className="min-h-[200px] animate-fade-in">
         {activeTab === 'intro' && (
           <div className="space-y-3 text-sm">
-            <p>{work.intro}</p>
+            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{work.intro}</p>
             {work.coreAbilities && work.coreAbilities.length > 0 && (
               <>
                 <p className="font-semibold mt-4">核心能力：</p>
                 <ul className="list-disc pl-5 space-y-1 text-muted-foreground">
                   {work.coreAbilities.map((ability, i) => (
-                    <li key={i}>{ability}</li>
+                    <li key={i} className="break-words [overflow-wrap:anywhere]">{ability}</li>
                   ))}
                 </ul>
               </>
@@ -307,11 +307,11 @@ export default function Detail() {
           <div className="space-y-3 text-sm">
             <div>
               <p className="font-semibold mb-1">适用场景：</p>
-              <p className="text-muted-foreground">{work.scene || '暂未填写'}</p>
+              <p className="text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{work.scene || '暂未填写'}</p>
             </div>
             <div>
               <p className="font-semibold mb-1">业务价值：</p>
-              <p className="text-muted-foreground">{work.businessValue || '暂未填写'}</p>
+              <p className="text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{work.businessValue || '暂未填写'}</p>
             </div>
           </div>
         )}
@@ -320,7 +320,7 @@ export default function Detail() {
           <div className="space-y-3 text-sm">
             <ol className="list-decimal pl-5 space-y-2">
               {work.usage.split(/\d+\.\s*/).filter(Boolean).map((step, i) => (
-                <li key={i} className="text-muted-foreground">{step.trim()}</li>
+                <li key={i} className="text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{step.trim()}</li>
               ))}
             </ol>
             <div
@@ -357,7 +357,7 @@ export default function Detail() {
                         {v.version}
                       </span>
                     </td>
-                    <td className="p-3 text-muted-foreground">{v.changelog}</td>
+                    <td className="p-3 text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{v.changelog}</td>
                     <td className="p-3 text-muted-foreground whitespace-nowrap">{v.date}</td>
                   </tr>
                 ))}
