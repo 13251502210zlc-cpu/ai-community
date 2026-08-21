@@ -3468,7 +3468,7 @@
             </div>
             <div class="perm-role-card">
               <div class="role-name">审核管理员 <span class="role-badge" style="background:rgba(245,158,11,0.12);color:var(--warning);">管理角色</span></div>
-              <div class="role-desc">负责内容审核与内容治理。可查看审核队列、通过/驳回版本、查看审核相关数据统计。不自动拥有运营管理权限。</div>
+              <div class="role-desc">负责内容审核与内容治理。可查看审核队列、通过/驳回版本、强制下架违规作品、查看审核相关数据统计。不自动拥有运营管理权限。</div>
             </div>
             <div class="perm-role-card">
               <div class="role-name">运营管理员 <span class="role-badge" style="background:rgba(124,58,237,0.12);color:var(--accent2);">管理角色</span></div>
@@ -3979,7 +3979,7 @@ sequenceDiagram
       var roleDescs = {
         'user': '所有登录员工默认拥有。可浏览已发布作品、搜索筛选、点赞收藏下载、发表评论。首次创建作品时自动获得创作者角色。',
         'creator': '管理自己的作品。可创建作品、管理版本、提交审核、编辑已发布作品、下架自己的作品、删除自己的作品。',
-        'reviewer': '负责审核与内容治理。可查看审核队列、通过/驳回版本、查看审核相关数据统计。',
+        'reviewer': '负责审核与内容治理。可查看审核队列、通过/驳回版本、强制下架违规作品、强制删除违规作品、删除违规评论。',
         'operator': '负责社区运营。可管理业务领域与标签、用户管理、运营推荐、数据统计。不自动拥有审核权限。',
         'super': '拥有全部权限。另可配置角色权限矩阵、分配用户角色、系统初始化配置。仅限 IT 管理员担任。'
       };

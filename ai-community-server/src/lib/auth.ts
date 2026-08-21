@@ -117,9 +117,13 @@ export async function getEffectivePermissions(userRoles: UserRole[]): Promise<Pe
   const effective = new Set<Permission>()
 
   for (const role of userRoles) {
+    if (role === 'super_admin') {
+      ALL_PERMISSIONS.forEach((permission) => effective.add(permission))
+      continue
+    }
     if (configuredRoles.has(role)) {
       rows
-        .filter((row) => row.role === role && row.allowed && ALL_PERMISSIONS.includes(row.permission as Permission))
+        .filter((row) => row.role === role && row.allowed && row.permission !== 'admin:role' && ALL_PERMISSIONS.includes(row.permission as Permission))
         .forEach((row) => effective.add(row.permission as Permission))
     } else {
       ROLE_PERMISSIONS[role]?.forEach((permission) => effective.add(permission))
@@ -145,5 +149,16 @@ export function requirePermission(...perms: Permission[]) {
     } catch (error) {
       next(error)
     }
+  }
+}
+
+/** 系统级能力必须校验实际角色，不能通过可配置权限间接获得。 */
+export function requireRole(role: UserRole) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!(req.userRoles || []).includes(role)) {
+      res.status(403).json({ error: '权限不足', code: 'FORBIDDEN' })
+      return
+    }
+    next()
   }
 }

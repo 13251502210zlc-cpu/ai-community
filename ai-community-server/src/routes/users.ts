@@ -25,13 +25,18 @@ router.post('/login', async (req, res, next) => {
       res.status(400).json({ error: '请输入账号和密码', code: 'VALIDATION_ERROR' })
       return
     }
+    if (typeof account !== 'string' || typeof password !== 'string' || account.trim().length > 100 || password.length > 128) {
+      res.status(400).json({ error: '账号或密码长度超出限制', code: 'VALIDATION_ERROR' })
+      return
+    }
+    const normalizedAccount = account.trim()
 
     // 按登录账号或工号查找用户
     const user = await prisma.user.findFirst({
       where: {
         OR: [
-          { loginAccount: account },
-          { employeeId: account },
+          { loginAccount: normalizedAccount },
+          { employeeId: normalizedAccount },
         ],
         loginMethod: { in: ['password', 'both'] },
       },
@@ -281,26 +286,138 @@ const getUserFavorites: RequestHandler = async (req, res, next) => {
       res.status(403).json({ error: '只能查看自己的收藏', code: 'FORBIDDEN' })
       return
     }
-    const favorites = await prisma.userFavorite.findMany({
-      where: { userId: req.params.id },
+    const page = Math.max(1, Number(req.query.page) || 1)
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 9))
+    const where = { userId: req.params.id, work: { status: 'published' } }
+    const [favorites, total] = await Promise.all([prisma.userFavorite.findMany({
+      where,
       include: {
         work: { include: { tags: true } },
       },
-    })
+      orderBy: { work: { publishedAt: 'desc' } },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    }), prisma.userFavorite.count({ where })])
     const workIds = favorites.map((favorite) => favorite.workId)
     const myLikes = await prisma.userLike.findMany({
       where: { userId: req.userId!, workId: { in: workIds } },
       select: { workId: true },
     })
     const likedIds = new Set(myLikes.map((item) => item.workId))
-    res.json(
-      favorites.map((f) => ({
+    res.json({
+      items: favorites.map((f) => ({
         ...f.work,
         tags: f.work.tags.map((t) => t.name),
         likedByMe: likedIds.has(f.workId),
         favoritedByMe: true,
-      }))
-    )
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/users/:id/likes —— 用户点赞的已发布作品（分页）
+const getUserLikes: RequestHandler = async (req, res, next) => {
+  try {
+    if (req.params.id !== req.userId) {
+      res.status(403).json({ error: '只能查看自己的点赞', code: 'FORBIDDEN' })
+      return
+    }
+    const page = Math.max(1, Number(req.query.page) || 1)
+    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 9))
+    const where = { userId: req.params.id, work: { status: 'published' } }
+    const [likes, total] = await Promise.all([
+      prisma.userLike.findMany({
+        where,
+        include: { work: { include: { tags: true } } },
+        orderBy: { work: { publishedAt: 'desc' } },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.userLike.count({ where }),
+    ])
+    const workIds = likes.map((like) => like.workId)
+    const favorites = await prisma.userFavorite.findMany({
+      where: { userId: req.userId!, workId: { in: workIds } }, select: { workId: true },
+    })
+    const favoriteIds = new Set(favorites.map((item) => item.workId))
+    res.json({
+      items: likes.map((like) => ({
+        ...like.work,
+        tags: like.work.tags.map((tag) => tag.name),
+        likedByMe: true,
+        favoritedByMe: favoriteIds.has(like.workId),
+      })),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/users/:id/summary —— 个人中心权威统计，避免由前端当前页反推。
+const getUserSummary: RequestHandler = async (req, res, next) => {
+  try {
+    if (req.params.id !== req.userId) {
+      res.status(403).json({ error: '只能查看自己的统计', code: 'FORBIDDEN' })
+      return
+    }
+    const [totalWorks, publishedWorks, favorites, likes, interactions] = await Promise.all([
+      prisma.work.count({ where: { authorId: req.params.id, status: { not: 'deleted' } } }),
+      prisma.work.count({ where: { authorId: req.params.id, status: 'published' } }),
+      prisma.userFavorite.count({ where: { userId: req.params.id, work: { status: 'published' } } }),
+      prisma.userLike.count({ where: { userId: req.params.id, work: { status: 'published' } } }),
+      prisma.work.aggregate({
+        where: { authorId: req.params.id, status: { not: 'deleted' } },
+        _sum: { likes: true, favorites: true, downloads: true, views: true },
+      }),
+    ])
+    const sums = interactions._sum
+    res.json({
+      totalWorks,
+      publishedWorks,
+      favorites,
+      likes,
+      interactions: (sums.likes || 0) + (sums.favorites || 0) + (sums.downloads || 0) + (sums.views || 0),
+    })
+  } catch (err) {
+    next(err)
+  }
+}
+
+// GET /api/users/:id/review-progress —— 按作品分组返回审核轨迹。
+const getUserReviewProgress: RequestHandler = async (req, res, next) => {
+  try {
+    if (req.params.id !== req.userId) {
+      res.status(403).json({ error: '只能查看自己的审核进度', code: 'FORBIDDEN' })
+      return
+    }
+    const works = await prisma.work.findMany({
+      where: { authorId: req.params.id, status: { not: 'deleted' } },
+      select: {
+        id: true, title: true, type: true, status: true,
+        events: { orderBy: { createdAt: 'desc' }, include: { reviewer: { select: { name: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    res.json(works.filter((work) => work.events.length > 0).map((work) => ({
+      workId: work.id,
+      workTitle: work.title,
+      workType: work.type,
+      workStatus: work.status,
+      events: work.events.map((event) => ({
+        id: event.id, version: event.version, status: event.status, reason: event.reason,
+        reviewer: event.reviewer?.name, createdAt: event.createdAt,
+      })),
+    })))
   } catch (err) {
     next(err)
   }
@@ -309,9 +426,15 @@ const getUserFavorites: RequestHandler = async (req, res, next) => {
 // 标准接口：/api/users/:id/*
 userContentRouter.get('/:id/works', authRequired, getUserWorks)
 userContentRouter.get('/:id/favorites', authRequired, getUserFavorites)
+userContentRouter.get('/:id/likes', authRequired, getUserLikes)
+userContentRouter.get('/:id/summary', authRequired, getUserSummary)
+userContentRouter.get('/:id/review-progress', authRequired, getUserReviewProgress)
 
 // 兼容已上线前端及旧调用方：/api/auth/users/:id/*
 router.get('/users/:id/works', authRequired, getUserWorks)
 router.get('/users/:id/favorites', authRequired, getUserFavorites)
+router.get('/users/:id/likes', authRequired, getUserLikes)
+router.get('/users/:id/summary', authRequired, getUserSummary)
+router.get('/users/:id/review-progress', authRequired, getUserReviewProgress)
 
 export default router

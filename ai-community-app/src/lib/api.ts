@@ -159,8 +159,53 @@ export async function searchWorks(params: {
 }
 
 // 获取单个作品最新详情（包含当前用户点赞/收藏状态）
-export async function getWorkDetail(workId: string): Promise<any> {
-  return apiFetch(`/works/${encodeURIComponent(workId)}`)
+export async function getWorkDetail(workId: string, trackView = false): Promise<any> {
+  return apiFetch(`/works/${encodeURIComponent(workId)}${trackView ? '?trackView=1' : ''}`)
+}
+
+export interface UserContentPage {
+  items: any[]
+  total: number
+  page: number
+  pageSize: number
+  totalPages: number
+}
+
+export function getUserFavorites(userId: string, page = 1, pageSize = 9): Promise<UserContentPage> {
+  return apiFetch(`/users/${encodeURIComponent(userId)}/favorites?page=${page}&pageSize=${pageSize}`)
+}
+
+export function getUserLikes(userId: string, page = 1, pageSize = 9): Promise<UserContentPage> {
+  return apiFetch(`/users/${encodeURIComponent(userId)}/likes?page=${page}&pageSize=${pageSize}`)
+}
+
+export function getUserSummary(userId: string): Promise<{
+  totalWorks: number
+  publishedWorks: number
+  favorites: number
+  likes: number
+  interactions: number
+}> {
+  return apiFetch(`/users/${encodeURIComponent(userId)}/summary`)
+}
+
+export interface UserReviewProgress {
+  workId: string
+  workTitle: string
+  workType: Work['type']
+  workStatus: Work['status']
+  events: Array<{
+    id: string
+    version: string
+    status: string
+    reason?: string
+    reviewer?: string
+    createdAt: string
+  }>
+}
+
+export function getUserReviewProgress(userId: string): Promise<UserReviewProgress[]> {
+  return apiFetch(`/users/${encodeURIComponent(userId)}/review-progress`)
 }
 
 // v2.0：获取运营推荐作品（公开，作品大厅首屏展示）

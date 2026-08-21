@@ -1,11 +1,13 @@
-import { useState, Fragment, useMemo } from 'react'
+import { useState, Fragment, useMemo, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Plus, Edit, Undo, MessageSquareWarning, Clock, CheckCircle, XCircle, ArrowUpCircle } from 'lucide-react'
-import { useApp } from '../store/AppStore'
+import { useApp, transformWork } from '../store/AppStore'
 import { TypeTag, WorkStatusBadge, Avatar } from '../components/Tags'
 import WorkCard from '../components/WorkCard'
-import { EmptyState } from '../components/Common'
+import { EmptyState, Pagination } from '../components/Common'
 import type { Work, WorkVersion } from '../types'
+import { getUserFavorites, getUserLikes, getUserReviewProgress, getUserSummary, type UserReviewProgress } from '../lib/api'
+import { formatDateTime } from '../lib/datetime'
 
 const TABS = [
   { id: 'works', label: '我的作品' },
@@ -31,17 +33,53 @@ function pickDisplayVersion(work: Work): WorkVersion | undefined {
 
 export default function Profile() {
   const navigate = useNavigate()
-  const { works, events, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast, hasPermission } = useApp()
+  const { works, currentUser, withdrawVersion, startModifyRejected, publishCandidateVersion, addToast, hasPermission } = useApp()
   const canCreateWork = hasPermission('work:create')
   const canSubmitWork = hasPermission('work:submit')
   const canEditOwnWork = hasPermission('work:editOwn')
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('works')
   const [showRejectId, setShowRejectId] = useState<string | null>(null)
+  const [summary, setSummary] = useState({ totalWorks: 0, publishedWorks: 0, favorites: 0, likes: 0, interactions: 0 })
+  const [favoriteItems, setFavoriteItems] = useState<Work[]>([])
+  const [likeItems, setLikeItems] = useState<Work[]>([])
+  const [favoritePage, setFavoritePage] = useState(1)
+  const [likePage, setLikePage] = useState(1)
+  const [favoritePages, setFavoritePages] = useState(1)
+  const [likePages, setLikePages] = useState(1)
+  const [reviewProgress, setReviewProgress] = useState<UserReviewProgress[]>([])
 
   const myWorks = works.filter((w) => w.authorId === currentUser.id)
-  const myFavorites = works.filter((w) => w.favoritedByMe)
-  const myLikes = works.filter((w) => w.likedByMe)
-  const myEvents = events.filter((e) => myWorks.some((w) => w.id === e.workId))
+
+  useEffect(() => {
+    if (!currentUser.id) return
+    getUserSummary(currentUser.id).then(setSummary).catch(() => {})
+  }, [currentUser.id, works])
+
+  useEffect(() => {
+    if (activeTab !== 'fav' || !currentUser.id) return
+    getUserFavorites(currentUser.id, favoritePage).then((result) => {
+      setFavoriteItems(result.items.map(transformWork))
+      setFavoritePages(result.totalPages)
+      if (favoritePage > result.totalPages) setFavoritePage(result.totalPages)
+      setSummary((current) => ({ ...current, favorites: result.total }))
+    }).catch((error) => addToast('error', error instanceof Error ? error.message : '收藏列表加载失败'))
+  }, [activeTab, addToast, currentUser.id, favoritePage])
+
+  useEffect(() => {
+    if (activeTab !== 'likes' || !currentUser.id) return
+    getUserLikes(currentUser.id, likePage).then((result) => {
+      setLikeItems(result.items.map(transformWork))
+      setLikePages(result.totalPages)
+      if (likePage > result.totalPages) setLikePage(result.totalPages)
+      setSummary((current) => ({ ...current, likes: result.total }))
+    }).catch((error) => addToast('error', error instanceof Error ? error.message : '点赞列表加载失败'))
+  }, [activeTab, addToast, currentUser.id, likePage])
+
+  useEffect(() => {
+    if (activeTab !== 'review' || !currentUser.id) return
+    getUserReviewProgress(currentUser.id).then(setReviewProgress)
+      .catch((error) => addToast('error', error instanceof Error ? error.message : '审核进度加载失败'))
+  }, [activeTab, addToast, currentUser.id])
 
   // v1.1：按展示版本状态排序（待审核 → 已驳回 → 草稿 → 已发布）
   const sortedMyWorks = useMemo(() => {
@@ -95,15 +133,15 @@ export default function Profile() {
         </div>
         <div className="flex items-center gap-6 sm:gap-8">
           <div className="flex flex-col items-center">
-            <span className="text-xl font-bold" style={{ color: 'var(--aic-primary)' }}>{myWorks.filter((w) => w.status === 'published').length}</span>
+            <span className="text-xl font-bold" style={{ color: 'var(--aic-primary)' }}>{summary.publishedWorks}</span>
             <span className="text-xs text-muted-foreground">已发布</span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="text-xl font-bold" style={{ color: 'var(--aic-gradient-violet)' }}>{myFavorites.length}</span>
+            <span className="text-xl font-bold" style={{ color: 'var(--aic-gradient-violet)' }}>{summary.favorites}</span>
             <span className="text-xs text-muted-foreground">收藏</span>
           </div>
           <div className="flex flex-col items-center">
-            <span className="text-xl font-bold" style={{ color: 'var(--state-success)' }}>{myLikes.length}</span>
+            <span className="text-xl font-bold" style={{ color: 'var(--state-success)' }}>{summary.likes}</span>
             <span className="text-xs text-muted-foreground">点赞</span>
           </div>
         </div>
@@ -329,12 +367,14 @@ export default function Profile() {
         {/* 我的收藏 */}
         {activeTab === 'fav' && (
           <div>
-            {myFavorites.length > 0 ? (
-              <div className="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {myFavorites.map((w) => (
-                  <WorkCard key={w.id} work={w} />
-                ))}
-              </div>
+            {favoriteItems.length > 0 ? (
+              <>
+                <div className="mb-3 text-sm text-muted-foreground">共 {summary.favorites} 个收藏作品</div>
+                <div className="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {favoriteItems.map((w) => <WorkCard key={w.id} work={w} />)}
+                </div>
+                <Pagination current={favoritePage} total={favoritePages} onChange={setFavoritePage} />
+              </>
             ) : (
               <EmptyState message="还没有收藏任何作品" />
             )}
@@ -344,12 +384,14 @@ export default function Profile() {
         {/* 我的点赞 */}
         {activeTab === 'likes' && (
           <div>
-            {myLikes.length > 0 ? (
-              <div className="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-                {myLikes.map((w) => (
-                  <WorkCard key={w.id} work={w} />
-                ))}
-              </div>
+            {likeItems.length > 0 ? (
+              <>
+                <div className="mb-3 text-sm text-muted-foreground">共 {summary.likes} 个点赞作品</div>
+                <div className="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {likeItems.map((w) => <WorkCard key={w.id} work={w} />)}
+                </div>
+                <Pagination current={likePage} total={likePages} onChange={setLikePage} />
+              </>
             ) : (
               <EmptyState message="还没有点赞任何作品" />
             )}
@@ -360,51 +402,31 @@ export default function Profile() {
         {activeTab === 'review' && (
           <div>
             <h3 className="text-base font-bold mb-4">审核进度追踪</h3>
-            <div className="relative pl-6">
-              <div className="absolute left-[7px] top-2 bottom-2 w-0.5" style={{ background: 'var(--aic-border-solid)' }} />
-              {myEvents.map((e) => {
-                const isApproved = e.status === 'approved'
-                const isRejected = e.status === 'rejected'
-                const Icon = isApproved ? CheckCircle : isRejected ? XCircle : Clock
-                const color = isApproved ? 'var(--state-success)' : isRejected ? 'var(--state-danger)' : 'var(--state-warning)'
-                return (
-                  <div key={e.id} className="relative pb-6 last:pb-0">
-                    <div
-                      className="absolute -left-6 top-1 flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 bg-white"
-                      style={{ borderColor: color }}
-                    >
-                      {isApproved && <div className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />}
-                    </div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <Icon size={14} style={{ color }} />
-                      <span className="text-xs text-muted-foreground">{e.date}</span>
-                      <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--aic-surface-elevated)', color: 'var(--aic-primary)' }}>{e.version}</span>
-                      {e.isFirstVersion && (
-                        <span className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--aic-violet-light)', color: 'var(--aic-gradient-violet)' }}>首版本</span>
-                      )}
-                    </div>
-                    <Link to={`/works/${e.workId}`} className="text-sm font-semibold hover:text-primary hover:underline">
-                      {e.workTitle} — {isApproved ? '审核通过' : isRejected ? '审核驳回' : '提交审核'}
-                    </Link>
-                    {isApproved && (
-                      <div className="text-xs mt-0.5" style={{ color: 'var(--state-success)' }}>
-                        {e.isFirstVersion ? '作品首次发布至大厅' : `新版本 ${e.version} 已替换线上版本`}
-                      </div>
-                    )}
-                    {isRejected && e.reason && (
-                      <div className="text-xs mt-0.5 whitespace-pre-wrap break-all line-clamp-3" style={{ color: 'var(--state-danger)' }}>
-                        修改意见：{e.reason}
-                      </div>
-                    )}
-                    {!isApproved && !isRejected && (
-                      <div className="text-xs text-muted-foreground mt-0.5">等待管理员审核中...</div>
-                    )}
+            <div className="space-y-4">
+              {reviewProgress.map((group) => (
+                <section key={group.workId} className="rounded-xl border bg-card p-4 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
+                  <Link to={`/works/${group.workId}`} className="font-semibold hover:text-primary hover:underline">{group.workTitle}</Link>
+                  <div className="mt-3 space-y-3 border-l-2 pl-4" style={{ borderColor: 'var(--aic-border-solid)' }}>
+                    {group.events.map((event) => {
+                      const isApproved = event.status === 'approved'
+                      const isRejected = event.status === 'rejected'
+                      const Icon = isApproved ? CheckCircle : isRejected ? XCircle : Clock
+                      const color = isApproved ? 'var(--state-success)' : isRejected ? 'var(--state-danger)' : 'var(--state-warning)'
+                      return (
+                        <div key={event.id}>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <Icon size={14} style={{ color }} />
+                            <span>{event.version}</span><span>{formatDateTime(event.createdAt)}</span>
+                            <span style={{ color }}>{isApproved ? '审核通过' : isRejected ? '审核驳回' : '已提交审核'}</span>
+                          </div>
+                          {event.reason && <p className="mt-1 text-xs whitespace-pre-wrap break-words" style={{ color: 'var(--state-danger)' }}>修改意见：{event.reason}</p>}
+                        </div>
+                      )
+                    })}
                   </div>
-                )
-              })}
-              {myEvents.length === 0 && (
-                <EmptyState message="暂无审核记录" />
-              )}
+                </section>
+              ))}
+              {reviewProgress.length === 0 && <EmptyState message="暂无审核记录" />}
             </div>
           </div>
         )}

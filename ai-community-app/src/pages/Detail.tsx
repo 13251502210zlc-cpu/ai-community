@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link, useNavigate } from 'react-router-dom'
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom'
 import {
   ThumbsUp, Star, Download, Share2, FileText, ArrowLeft, Send,
 } from 'lucide-react'
@@ -19,25 +19,19 @@ const TABS = [
 export default function Detail() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { works, worksLoading, currentUser, refreshWork, toggleLike, toggleFavorite, incrementDownload, incrementView, addComment, addToast, hasPermission } = useApp()
+  const location = useLocation()
+  const { works, worksLoading, currentUser, refreshWork, toggleLike, toggleFavorite, incrementDownload, addComment, addToast, hasPermission } = useApp()
   const [activeTab, setActiveTab] = useState<typeof TABS[number]['id']>('intro')
   const [comment, setComment] = useState('')
-  const [viewCounted, setViewCounted] = useState(false)
+  const [commentsExpanded, setCommentsExpanded] = useState(false)
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState<string | null>(null)
 
   const work = works.find((w) => w.id === id)
 
   // 等全局列表加载完成后再取详情，避免管理员作品列表的精简响应覆盖评论、点赞和收藏状态。
   useEffect(() => {
-    if (id && !worksLoading) void refreshWork(id)
-  }, [id, worksLoading, refreshWork])
-
-  useEffect(() => {
-    if (work && !viewCounted) {
-      incrementView(work.id)
-      setViewCounted(true)
-    }
-  }, [work, viewCounted, incrementView])
+    if (id && !worksLoading) void refreshWork(id, Boolean((location.state as { trackView?: boolean } | null)?.trackView))
+  }, [id, worksLoading, refreshWork, location.state])
 
   if (!work) {
     return (
@@ -436,7 +430,7 @@ export default function Detail() {
           </button>
         </div>
         <div className="space-y-4">
-          {work.comments.map((c) => (
+          {(commentsExpanded ? work.comments : work.comments.slice(0, 5)).map((c) => (
             <div key={c.id} className="border-b pb-3 last:border-0" style={{ borderColor: 'var(--aic-border-solid)' }}>
               <div className="flex items-center gap-2 mb-1">
                 <Avatar name={c.userName} color={c.avatarColor} size={24} />
@@ -449,6 +443,16 @@ export default function Detail() {
           ))}
           {work.comments.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-6">还没有评价，快来发表第一条吧～</p>
+          )}
+          {work.comments.length > 5 && (
+            <button
+              type="button"
+              onClick={() => setCommentsExpanded((expanded) => !expanded)}
+              className="mx-auto block rounded-md border px-4 py-2 text-sm text-muted-foreground transition hover:text-primary"
+              style={{ borderColor: 'var(--aic-border-solid)' }}
+            >
+              {commentsExpanded ? '收起评论' : `展开全部 ${work.comments.length} 条评论`}
+            </button>
           )}
         </div>
       </div>

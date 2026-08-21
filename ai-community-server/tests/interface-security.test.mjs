@@ -417,7 +417,9 @@ test('用户作品和收藏同时支持标准路径与兼容路径', async () =>
 
     const favoritesResponse = await request(`${prefix}/${adminId}/favorites`, { headers })
     assert.equal(favoritesResponse.status, 200)
-    assert.deepEqual(await favoritesResponse.json(), [])
+    const favorites = await favoritesResponse.json()
+    assert.deepEqual(favorites.items, [])
+    assert.equal(favorites.total, 0)
   }
 })
 
@@ -519,7 +521,7 @@ test('作品内容只有版本审核通过后才切换上线', async () => {
   const galleryWork = (await galleryResponse.json()).items.find((item) => item.id === createdId)
   assert.equal(galleryWork.title, originalTitle)
 
-  const detailResponse = await request(`/api/works/${createdId}`, { headers: auth })
+  const detailResponse = await request(`/api/works/${createdId}?trackView=1`, { headers: auth })
   assert.equal(detailResponse.status, 200)
   const draftDetail = await detailResponse.json()
   assert.equal(draftDetail.title, originalTitle)
@@ -557,7 +559,7 @@ test('作品内容只有版本审核通过后才切换上线', async () => {
   )
 })
 
-test('详情响应返回最新浏览量和持久化评论', async () => {
+test('仅大厅标记入口增加浏览量且同一用户短期去重，评论持久化', async () => {
   const auth = { authorization: `Bearer ${token(normalId, ['user'])}`, 'content-type': 'application/json' }
   const publishedId = `published-detail-${suffix}`
   await prisma.work.create({
@@ -579,12 +581,19 @@ test('详情响应返回最新浏览量和持久化评论', async () => {
     method: 'POST', headers: auth, body: JSON.stringify({ content: '这是一条会在刷新后保留的评价' }),
   })
   assert.equal(commentResponse.status, 201)
-  const detailResponse = await request(`/api/works/${publishedId}`, { headers: auth })
+  const untrackedResponse = await request(`/api/works/${publishedId}`, { headers: auth })
+  assert.equal(untrackedResponse.status, 200)
+  assert.equal((await untrackedResponse.json()).views, 3)
+
+  const detailResponse = await request(`/api/works/${publishedId}?trackView=1`, { headers: auth })
   assert.equal(detailResponse.status, 200)
   const detail = await detailResponse.json()
   assert.equal(detail.views, 4)
   assert.equal(detail.comments.length, 1)
   assert.equal(detail.comments[0].content, '这是一条会在刷新后保留的评价')
+
+  const repeatedResponse = await request(`/api/works/${publishedId}?trackView=1`, { headers: auth })
+  assert.equal((await repeatedResponse.json()).views, 4)
 })
 
 test('管理员强制下架必须填写原因', async () => {

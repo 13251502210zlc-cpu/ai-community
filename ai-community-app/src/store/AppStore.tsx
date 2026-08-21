@@ -28,7 +28,7 @@ interface AppState {
   worksLoading: boolean
   worksError: string
   reloadWorks: () => void
-  refreshWork: (id: string) => Promise<Work | null>
+  refreshWork: (id: string, trackView?: boolean) => Promise<Work | null>
   // v1.3：业务领域与标签可变状态
   domains: string[]
   fetchDomains: () => Promise<void>
@@ -356,9 +356,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { fetchWorks() }, [fetchWorks])
 
-  const refreshWork = useCallback(async (id: string): Promise<Work | null> => {
+  const refreshWork = useCallback(async (id: string, trackView = false): Promise<Work | null> => {
     try {
-      const refreshed = transformWork(await getWorkDetail(id))
+      const refreshed = transformWork(await getWorkDetail(id, trackView))
       setWorks((prev) => {
         const exists = prev.some((work) => work.id === id)
         return exists ? prev.map((work) => work.id === id ? refreshed : work) : [refreshed, ...prev]
@@ -577,16 +577,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // v1.8：调用后端 /api/admin/works/:id/offline，成功后更新本地 state
   const offlineWork = useCallback(async (id: string, reason: string): Promise<boolean> => {
     const w = worksRef.current.find((x) => x.id === id)
-    if (!w) return false
     try {
       await adminOfflineWork(id, reason)
       setWorks((prev) => prev.map((work) =>
         work.id === id && work.status === 'published' ? { ...work, status: 'offline' as WorkStatus } : work
       ))
-      addOperationLog({ module: '后台管理', action: '上架/下架', content: '下架作品', target: w.title })
+      addOperationLog({ module: '后台管理', action: '上架/下架', content: '下架作品', target: w?.title || id })
       return true
     } catch (err: any) {
-      addOperationLog({ module: '后台管理', action: '上架/下架', content: '下架作品', target: w.title, result: 'failed' })
+      addOperationLog({ module: '后台管理', action: '上架/下架', content: '下架作品', target: w?.title || id, result: 'failed' })
       addToast('error', err instanceof Error ? err.message : '作品下架失败')
       return false
     }
@@ -596,16 +595,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // v1.8：调用后端 /api/admin/works/:id/republish，成功后更新本地 state
   const onlineWork = useCallback(async (id: string): Promise<boolean> => {
     const w = worksRef.current.find((x) => x.id === id)
-    if (!w) return false
     try {
       await adminRepublishWork(id)
       setWorks((prev) => prev.map((work) =>
         work.id === id && work.status === 'offline' ? { ...work, status: 'published' as WorkStatus } : work
       ))
-      addOperationLog({ module: '后台管理', action: '上架/下架', content: '上架作品', target: w.title })
+      addOperationLog({ module: '后台管理', action: '上架/下架', content: '上架作品', target: w?.title || id })
       return true
     } catch (err: any) {
-      addOperationLog({ module: '后台管理', action: '上架/下架', content: '上架作品', target: w.title, result: 'failed' })
+      addOperationLog({ module: '后台管理', action: '上架/下架', content: '上架作品', target: w?.title || id, result: 'failed' })
       addToast('error', err instanceof Error ? err.message : '作品上架失败')
       return false
     }
@@ -614,7 +612,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // v1.5：批量下架
   // v1.8：并发调用后端 API，返回实际成功数
   const batchOfflineWorks = useCallback(async (ids: string[], reason: string): Promise<number> => {
-    const targets = worksRef.current.filter((w) => ids.includes(w.id) && w.status === 'published')
+    const targets = ids.map((id) => {
+      const cached = worksRef.current.find((work) => work.id === id)
+      return { id, title: cached?.title || id }
+    })
     if (targets.length === 0) return 0
     const results = await Promise.allSettled(targets.map((w) => adminOfflineWork(w.id, reason)))
     const successIds: string[] = []
@@ -642,7 +643,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // v1.5：批量上架
   // v1.8：并发调用后端 API，返回实际成功数
   const batchOnlineWorks = useCallback(async (ids: string[]): Promise<number> => {
-    const targets = worksRef.current.filter((w) => ids.includes(w.id) && w.status === 'offline')
+    const targets = ids.map((id) => {
+      const cached = worksRef.current.find((work) => work.id === id)
+      return { id, title: cached?.title || id }
+    })
     if (targets.length === 0) return 0
     const results = await Promise.allSettled(targets.map((w) => adminRepublishWork(w.id)))
     const successIds: string[] = []
@@ -670,7 +674,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // v1.5：批量软删除（已删除作品不可再操作）
   // v1.8：并发调用后端 API，返回实际成功数
   const batchDeleteWorks = useCallback(async (ids: string[]): Promise<number> => {
-    const targets = worksRef.current.filter((w) => ids.includes(w.id) && w.status !== 'deleted')
+    const targets = ids.map((id) => {
+      const cached = worksRef.current.find((work) => work.id === id)
+      return { id, title: cached?.title || id }
+    })
     if (targets.length === 0) return 0
     const results = await Promise.allSettled(targets.map((w) => adminDeleteWork(w.id)))
     const successIds: string[] = []
