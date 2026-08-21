@@ -383,6 +383,10 @@ export default function Publish() {
       addToast('error', '该类型作品必须上传附件')
       return
     }
+    if (attachments.length > 10) {
+      addToast('error', '附件最多上传 10 个，请移除多余附件后再提交')
+      return
+    }
     // 更新说明前后端统一为至少 20 个字符
     if (isChangelogRequired) {
       if (!changelog.trim()) {
@@ -731,6 +735,11 @@ export default function Publish() {
                     onChange={async (e) => {
                       const file = e.target.files?.[0]
                       if (!file) return
+                      if (attachments.length >= 10) {
+                        addToast('error', '附件最多上传 10 个')
+                        if (attachmentInputRef.current) attachmentInputRef.current.value = ''
+                        return
+                      }
                       if (file.size > 100 * 1024 * 1024) {
                         addToast('error', '附件不能超过 100MB（恰好 100MB 可以上传）')
                         if (attachmentInputRef.current) attachmentInputRef.current.value = ''
@@ -752,7 +761,7 @@ export default function Publish() {
                   />
                   <button
                     onClick={() => attachmentInputRef.current?.click()}
-                    disabled={uploadingAttachment}
+                    disabled={uploadingAttachment || attachments.length >= 10}
                     className="flex w-full flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 transition hover:border-primary hover:bg-primary/5 disabled:opacity-50"
                     style={{ borderColor: 'var(--aic-border-solid)' }}
                   >
@@ -760,6 +769,12 @@ export default function Publish() {
                       <>
                         <Loader2 size={24} className="animate-spin text-muted-foreground mb-1" />
                         <span className="text-xs text-muted-foreground">上传中...</span>
+                      </>
+                    ) : attachments.length >= 10 ? (
+                      <>
+                        <FileUp size={24} className="text-muted-foreground mb-1" />
+                        <span className="text-xs text-muted-foreground">已达到附件数量上限（10 个）</span>
+                        <span className="text-[10px] text-muted-foreground mt-0.5">移除已有附件后可继续上传</span>
                       </>
                     ) : (
                       <>
@@ -769,6 +784,7 @@ export default function Publish() {
                       </>
                     )}
                   </button>
+                  <div className="mt-1 text-right text-[10px] text-muted-foreground">已上传 {attachments.length}/10 个附件</div>
                   {attachments.length > 0 && (
                     <div className="mt-2 space-y-1">
                       {attachments.map((a, i) => {

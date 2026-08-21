@@ -148,6 +148,7 @@ export default function Gallery() {
               <Link
                 key={w.id}
                 to={`/works/${w.id}`}
+                state={{ trackView: true }}
                 className="flex items-center gap-3 rounded-lg bg-white/70 p-3 backdrop-blur transition hover:bg-white"
               >
                 <div className={`flex h-12 w-12 items-center justify-center rounded-lg text-lg font-bold text-white flex-shrink-0 ${WORK_TYPES.find((t) => t.type === w.type)?.label.charAt(0) ? '' : ''}`}
@@ -314,7 +315,7 @@ export default function Gallery() {
       ) : works.length > 0 ? (
         <section className="grid gap-4 sm:gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {works.map((work) => (
-            <WorkCard key={work.id} work={work} />
+            <WorkCard key={work.id} work={work} trackView />
           ))}
         </section>
       ) : !error ? (

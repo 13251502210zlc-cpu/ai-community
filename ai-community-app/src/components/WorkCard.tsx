@@ -5,11 +5,12 @@ import { TYPE_CONFIG } from '../types'
 import { TypeTag } from './Tags'
 import { assetUrl } from '../lib/api'
 
-export default function WorkCard({ work }: { work: Work }) {
+export default function WorkCard({ work, trackView = false }: { work: Work; trackView?: boolean }) {
   const cfg = TYPE_CONFIG[work.type]
   return (
     <Link
       to={`/works/${work.id}`}
+      state={trackView ? { trackView: true } : undefined}
       className="group block overflow-hidden rounded-xl border bg-card shadow-sm transition hover:shadow-lg hover:-translate-y-0.5"
       style={{ borderColor: 'var(--aic-border-solid)' }}
     >

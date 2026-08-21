@@ -236,6 +236,11 @@ export default function Login() {
       return
     }
 
+    if (account.trim().length > 100 || password.length > 128) {
+      setErrorMsg('账号最多 100 个字符，密码最多 128 个字符')
+      return
+    }
+
     if (!backendOnline) {
       setErrorMsg('后端服务未启动，无法登录')
       return
@@ -503,7 +508,8 @@ export default function Login() {
                 <input
                   type="text"
                   value={account}
-                  onChange={(e) => setAccount(e.target.value)}
+                  onChange={(e) => setAccount(e.target.value.slice(0, 100))}
+                  maxLength={100}
                   placeholder="工号或登录账号"
                   className="w-full h-10 rounded-md border pl-9 pr-3 text-sm outline-none focus:ring-2"
                   style={{ borderColor: 'var(--aic-border-solid)' }}
@@ -520,7 +526,8 @@ export default function Login() {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => setPassword(e.target.value.slice(0, 128))}
+                  maxLength={128}
                   placeholder="请输入密码"
                   className="w-full h-10 rounded-md border pl-9 pr-9 text-sm outline-none focus:ring-2"
                   style={{ borderColor: 'var(--aic-border-solid)' }}

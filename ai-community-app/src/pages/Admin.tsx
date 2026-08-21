@@ -119,9 +119,10 @@ const PERMISSION_DEFINITIONS: Array<{
   { permission: 'admin:domain', group: '后台管理', label: '业务领域管理', desc: '新增、修改和删除业务领域' },
   { permission: 'admin:tag', group: '后台管理', label: '标签管理', desc: '新增和删除标签' },
   { permission: 'admin:user', group: '后台管理', label: '用户管理 / 角色查看', desc: '查看用户及配置账号' },
+  { permission: 'admin:userRole', group: '后台管理', label: '分配用户角色', desc: '为用户分配或移除角色' },
   { permission: 'admin:recommend', group: '后台管理', label: '运营推荐管理', desc: '设置和取消推荐作品' },
   { permission: 'admin:stats', group: '后台管理', label: '数据统计查看', desc: '查看平台统计数据' },
-  { permission: 'admin:role', group: '后台管理', label: '权限配置 / 角色分配', desc: '配置角色权限及分配用户角色' },
+  { permission: 'admin:role', group: '后台管理', label: '权限配置（仅超管）', desc: '配置各角色权限，仅超级管理员可用' },
 ]
 
 function defaultPermissionMatrix(): Record<UserRole, Permission[]> {
@@ -174,7 +175,7 @@ function PermissionMatrix({
   }, [canEdit, addToast])
 
   const handleCellChange = (permission: Permission, role: UserRole, next: PermValue) => {
-    if (role === 'super_admin') return
+    if (role === 'super_admin' || permission === 'admin:role') return
     setMatrix((prev) => ({
       ...prev,
       [role]: next === 'no'
@@ -212,7 +213,7 @@ function PermissionMatrix({
     if (role === 'super_admin') return
     setMatrix((prev) => ({
       ...prev,
-      [role]: value === 'no' ? [] : PERMISSION_DEFINITIONS.map((row) => row.permission),
+      [role]: value === 'no' ? [] : PERMISSION_DEFINITIONS.filter((row) => row.permission !== 'admin:role').map((row) => row.permission),
     }))
     setDirty(true)
   }
@@ -344,7 +345,7 @@ function PermissionMatrix({
                               value={r === 'super_admin'
                                 ? 'yes'
                                 : matrix[r]?.includes(row.permission) ? (row.own ? 'own' : 'yes') : 'no'}
-                              editable={r !== 'super_admin'}
+                              editable={r !== 'super_admin' && row.permission !== 'admin:role'}
                               onChange={(next) => handleCellChange(
                                 row.permission,
                                 r,
@@ -751,8 +752,10 @@ export default function Admin() {
   const [platformStats, setPlatformStats] = useState<AdminStatsResult | null>(null)
   const [recommendedWorks, setRecommendedWorks] = useState<Work[]>([])
   const [recommendedLoading, setRecommendedLoading] = useState(false)
+  const [recommendSearch, setRecommendSearch] = useState('')
+  const [recommendCandidates, setRecommendCandidates] = useState<Work[]>([])
+  const [recommendCandidateTotal, setRecommendCandidateTotal] = useState(0)
 
-  const publishedWorks = works.filter((w) => w.status === 'published')
   const totalWorks = platformStats?.summary.totalWorks ?? 0
   const totalUsers = platformStats?.summary.totalUsers ?? 0
   const totalDownloads = platformStats?.summary.totalDownloads ?? 0
@@ -765,11 +768,12 @@ export default function Admin() {
   // v1.7：基于多角色权限并集判断
   const userRoles = currentUser.roles || []
   const isSuperAdmin = userRoles.includes('super_admin')
-  const canConfigPerm = hasPermission('admin:role')
+  const canConfigPerm = isSuperAdmin
   // v1.3：作品审核需要审核管理员或超级管理员（运营管理员不再有审核权限）
   const canReview = hasPermission('review:view')
   // v1.2：用户管理需要运营管理员及以上
   const canManageUser = hasPermission('admin:user')
+  const canAssignRoles = hasPermission('admin:userRole')
   const canReadWorks = hasPermission('admin:workRead')
   const canManageWorks = hasPermission('admin:workManage')
   const canManageDomains = hasPermission('admin:domain')
@@ -834,6 +838,19 @@ export default function Admin() {
       refreshRecommended()
     }
   }, [activeNav, canRecommend, refreshRecommended])
+
+  useEffect(() => {
+    if (!canRecommend || activeNav !== 'recommend') return
+    const timer = window.setTimeout(() => {
+      getAdminWorks({ page: 1, pageSize: 20, status: 'published', q: recommendSearch.trim() })
+        .then((result) => {
+          setRecommendCandidates(result.items.map(transformWork))
+          setRecommendCandidateTotal(result.total)
+        })
+        .catch((error) => addToast('error', error instanceof Error ? error.message : '可推荐作品加载失败'))
+    }, recommendSearch.trim() ? 250 : 0)
+    return () => window.clearTimeout(timer)
+  }, [activeNav, addToast, canRecommend, recommendSearch])
 
   const handleToggleRecommend = async (id: string, title: string) => {
     const wasRecommended = recommended.some((work) => work.id === id)
@@ -994,8 +1011,20 @@ export default function Admin() {
               </div>
               <div className="rounded-xl border bg-card p-5 shadow-sm" style={{ borderColor: 'var(--aic-border-solid)' }}>
                 <h3 className="text-sm font-bold mb-3">添加推荐作品</h3>
+                <div className="relative mb-3">
+                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={recommendSearch}
+                    onChange={(event) => setRecommendSearch(event.target.value.slice(0, 50))}
+                    maxLength={50}
+                    placeholder="搜索全部已发布作品名称、作者或简介"
+                    className="h-10 w-full rounded-md border pl-9 pr-3 text-sm outline-none focus:ring-2"
+                    style={{ borderColor: 'var(--aic-border-solid)' }}
+                  />
+                </div>
+                <p className="mb-2 text-xs text-muted-foreground">候选来源：全部已发布作品，共匹配 {recommendCandidateTotal} 条；下方展示前 20 条</p>
                 <div className="space-y-2">
-                  {publishedWorks.filter((w) => !recommended.some((item) => item.id === w.id)).slice(0, 8).map((w) => (
+                  {recommendCandidates.filter((w) => !recommended.some((item) => item.id === w.id)).map((w) => (
                     <div key={w.id} className="flex items-center justify-between py-1.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <TypeTag type={w.type} size="sm" />
@@ -1112,7 +1141,7 @@ export default function Admin() {
 
           {/* 用户管理 */}
           {activeNav === 'user' && (
-            <UserManagement canManageUser={canManageUser} />
+            <UserManagement canManageUser={canManageUser} canAssignRoles={canAssignRoles} />
           )}
 
           {/* v2.0：操作日志 - 从后端 API 拉取，支持筛选/搜索/导出 */}
@@ -1353,6 +1382,18 @@ function ReviewPanel({
             </div>
           )}
 
+          <div className="mb-3">
+            <div className="text-xs font-semibold mb-1">应用场景</div>
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.work.scene || '未填写'}</div>
+          </div>
+
+          <div className="mb-3">
+            <div className="text-xs font-semibold mb-1">核心能力</div>
+            <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              {selected.work.coreAbilities?.length ? selected.work.coreAbilities.join('、') : '未填写'}
+            </div>
+          </div>
+
           <div className="mb-4">
             <div className="text-xs font-semibold mb-1">版本更新内容</div>
             <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{selected.version.changelog}</div>
@@ -1457,7 +1498,7 @@ function ReviewPanel({
 }
 
 // ============ 用户管理面板（v1.4：重构，支持登录方式配置） ============
-function UserManagement({ canManageUser }: { canManageUser: boolean }) {
+function UserManagement({ canManageUser, canAssignRoles }: { canManageUser: boolean; canAssignRoles: boolean }) {
   const { addToast, users, fetchUsers, updateUserAccount, resetUserPassword } = useApp()
   const [search, setSearch] = useState('')
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all')
@@ -1556,8 +1597,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
     setSaving(true)
     try {
       await updateUserAccount(editingUser.id, {
-        roles: editForm.roles,
-        role: editForm.roles[0],
+        ...(canAssignRoles ? { roles: editForm.roles, role: editForm.roles[0] } : {}),
         loginMethod: editForm.loginMethod,
         loginAccount: editForm.loginMethod === 'wecom' ? undefined : editForm.loginAccount.trim(),
         password: editForm.loginMethod === 'wecom' || !editForm.password ? undefined : editForm.password,
@@ -1848,6 +1888,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
                     <input
                       type="checkbox"
                       checked={editForm.roles.includes(r)}
+                      disabled={!canAssignRoles}
                       onChange={() => {
                         const has = editForm.roles.includes(r)
                         setEditForm({
@@ -1861,7 +1902,7 @@ function UserManagement({ canManageUser }: { canManageUser: boolean }) {
                 ))}
               </div>
               <p className="text-xs mt-1.5" style={{ color: 'var(--aic-muted-foreground)' }}>
-                已选 {editForm.roles.length} 个角色，权限取并集
+                {canAssignRoles ? `已选 ${editForm.roles.length} 个角色，权限取并集` : '当前仅可查看角色；需要“分配用户角色”权限才能修改'}
               </p>
             </div>
 

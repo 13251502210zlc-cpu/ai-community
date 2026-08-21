@@ -2,7 +2,7 @@ import { Router } from 'express'
 import bcrypt from 'bcryptjs'
 import crypto from 'crypto'
 import { prisma } from '../lib/prisma.js'
-import { authRequired, requirePermission } from '../lib/auth.js'
+import { authRequired, requirePermission, requireRole } from '../lib/auth.js'
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, type Permission, type UserRole } from '../lib/permissions.js'
 import { publishApprovedCandidate } from '../lib/version-service.js'
 import { getUnsafeTagReason } from '../lib/content-filter.js'
@@ -274,7 +274,13 @@ router.post('/domains', requirePermission('admin:domain'), async (req, res, next
       res.status(400).json({ error: '业务领域名称不能超过 20 个字符', code: 'VALIDATION_ERROR' })
       return
     }
-    const domain = await prisma.businessDomain.create({ data: { name: name.trim() } })
+    const normalizedName = name.trim()
+    const duplicate = await prisma.businessDomain.findUnique({ where: { name: normalizedName }, select: { id: true } })
+    if (duplicate) {
+      res.status(409).json({ error: '业务领域已存在', code: 'DUPLICATE_DOMAIN' })
+      return
+    }
+    const domain = await prisma.businessDomain.create({ data: { name: normalizedName } })
     res.status(201).json(domain)
   } catch (err) {
     next(err)
@@ -293,9 +299,18 @@ router.put('/domains/:id', requirePermission('admin:domain'), async (req, res, n
       res.status(400).json({ error: '业务领域名称不能超过 20 个字符', code: 'VALIDATION_ERROR' })
       return
     }
+    const normalizedName = name.trim()
+    const duplicate = await prisma.businessDomain.findFirst({
+      where: { name: normalizedName, id: { not: req.params.id } },
+      select: { id: true },
+    })
+    if (duplicate) {
+      res.status(409).json({ error: '业务领域已存在', code: 'DUPLICATE_DOMAIN' })
+      return
+    }
     const updated = await prisma.businessDomain.update({
       where: { id: req.params.id },
-      data: { name: name.trim() },
+      data: { name: normalizedName },
     })
     res.json(updated)
   } catch (err) {
@@ -441,7 +456,7 @@ router.get('/users', requirePermission('admin:user'), async (req, res, next) => 
 // PUT /api/admin/users/:id/roles —— 分配用户角色（v1.7：多角色）
 // body: { roles: UserRole[] } —— 设置多个角色（权限取并集）
 // 兼容旧版 PUT /users/:id/role body: { role } —— 单角色
-router.put('/users/:id/roles', requirePermission('admin:role'), async (req, res, next) => {
+router.put('/users/:id/roles', requirePermission('admin:userRole'), async (req, res, next) => {
   try {
     const { roles: bodyRoles, role: bodyRole } = req.body as {
       roles?: UserRole[]
@@ -460,6 +475,13 @@ router.put('/users/:id/roles', requirePermission('admin:role'), async (req, res,
     }
     const mainRole = roles.find((role) => role !== 'user') || 'user'
     roles = Array.from(new Set(['user' as UserRole, ...roles]))
+    const targetIsSuperAdmin = await prisma.userRole.findUnique({
+      where: { userId_role: { userId: req.params.id, role: 'super_admin' } }, select: { userId: true },
+    })
+    if ((roles.includes('super_admin') || targetIsSuperAdmin) && !(req.userRoles || []).includes('super_admin')) {
+      res.status(403).json({ error: '只有超级管理员可以分配或移除超级管理员角色', code: 'FORBIDDEN' })
+      return
+    }
     await ensureSuperAdminRemains(req.params.id, roles)
 
     // v1.7：更新 assignedRoles 关联表（先删后建）+ User.role 主角色
@@ -485,7 +507,7 @@ router.put('/users/:id/roles', requirePermission('admin:role'), async (req, res,
 })
 
 // v1.7：兼容旧版单角色分配路由（单角色转单元素数组）
-router.put('/users/:id/role', requirePermission('admin:role'), async (req, res, next) => {
+router.put('/users/:id/role', requirePermission('admin:userRole'), async (req, res, next) => {
   try {
     const { role } = req.body as { role?: UserRole }
     const validRoles: UserRole[] = ['user', 'creator', 'reviewer', 'operator', 'super_admin']
@@ -494,6 +516,13 @@ router.put('/users/:id/role', requirePermission('admin:role'), async (req, res, 
       return
     }
     const roles: UserRole[] = role === 'user' ? ['user'] : ['user', role]
+    const targetIsSuperAdmin = await prisma.userRole.findUnique({
+      where: { userId_role: { userId: req.params.id, role: 'super_admin' } }, select: { userId: true },
+    })
+    if ((role === 'super_admin' || targetIsSuperAdmin) && !(req.userRoles || []).includes('super_admin')) {
+      res.status(403).json({ error: '只有超级管理员可以分配或移除超级管理员角色', code: 'FORBIDDEN' })
+      return
+    }
     await ensureSuperAdminRemains(req.params.id, roles)
     // v1.7：单角色也写入 assignedRoles 关联表，保持数据一致
     await prisma.$transaction([
@@ -512,7 +541,7 @@ router.put('/users/:id/role', requirePermission('admin:role'), async (req, res, 
 })
 
 // GET /api/admin/permission-matrix —— 权限矩阵
-router.get('/permission-matrix', requirePermission('admin:role'), async (_req, res, next) => {
+router.get('/permission-matrix', requireRole('super_admin'), async (_req, res, next) => {
   try {
     const configured = await prisma.rolePermission.findMany()
     const result: Record<string, string[]> = {}
@@ -523,7 +552,7 @@ router.get('/permission-matrix', requirePermission('admin:role'), async (_req, r
       }
       const rows = configured.filter((row) => row.role === role)
       result[role] = rows.length > 0
-        ? rows.filter((row) => row.allowed && ALL_PERMISSIONS.includes(row.permission as Permission)).map((row) => row.permission)
+        ? rows.filter((row) => row.allowed && row.permission !== 'admin:role' && ALL_PERMISSIONS.includes(row.permission as Permission)).map((row) => row.permission)
         : ROLE_PERMISSIONS[role]
     }
     res.json(result)
@@ -532,7 +561,7 @@ router.get('/permission-matrix', requirePermission('admin:role'), async (_req, r
   }
 })
 
-router.put('/permission-matrix/:role', requirePermission('admin:role'), async (req, res, next) => {
+router.put('/permission-matrix/:role', requireRole('super_admin'), async (req, res, next) => {
   try {
     const role = req.params.role as UserRole
     if (!(role in ROLE_PERMISSIONS) || role === 'super_admin') {
@@ -542,6 +571,10 @@ router.put('/permission-matrix/:role', requirePermission('admin:role'), async (r
     const requested = Array.isArray(req.body?.permissions) ? req.body.permissions as string[] : []
     if (requested.some((permission) => !ALL_PERMISSIONS.includes(permission as Permission))) {
       res.status(400).json({ error: '包含未知权限', code: 'VALIDATION_ERROR' })
+      return
+    }
+    if (requested.includes('admin:role')) {
+      res.status(400).json({ error: '权限配置能力仅限超级管理员', code: 'VALIDATION_ERROR' })
       return
     }
     const permissions = Array.from(new Set(requested))

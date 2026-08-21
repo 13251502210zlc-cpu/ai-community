@@ -11,6 +11,23 @@ import { ARCHIVED_DOMAIN_PREFIX, displayBusinessDomainName } from '../lib/archiv
 
 const router = Router()
 
+const VIEW_COOLDOWN_MS = 30 * 60 * 1000
+const recentViews = new Map<string, number>()
+
+function shouldCountView(userId: string, workId: string) {
+  const key = `${userId}:${workId}`
+  const now = Date.now()
+  const lastViewedAt = recentViews.get(key) || 0
+  if (now - lastViewedAt < VIEW_COOLDOWN_MS) return false
+  recentViews.set(key, now)
+  if (recentViews.size > 10_000) {
+    for (const [entryKey, timestamp] of recentViews) {
+      if (now - timestamp >= VIEW_COOLDOWN_MS) recentViews.delete(entryKey)
+    }
+  }
+  return true
+}
+
 // 作品类型校验
 const WORK_TYPES: WorkType[] = ['skill', 'app', 'agent', 'prompt', 'workflow', 'case']
 
@@ -37,7 +54,7 @@ const createWorkSchema = z.object({
     size: z.string().max(32, '附件大小描述过长').default('0 KB'),
     url: z.string().min(1).max(2048, '附件地址过长'),
     storedName: z.string().min(1).max(255, '附件存储名称过长'),
-  })).default([]),
+  })).max(10, '附件最多上传 10 个').default([]),
 })
 
 // 作品详情序列化
@@ -240,8 +257,8 @@ router.get('/:id', authRequired, async (req, res, next) => {
       res.status(404).json({ error: '作品不存在', code: 'NOT_FOUND' })
       return
     }
-    // 先完成计数再序列化，确保本次详情响应中的浏览量就是最新值。
-    if (rawWork.status === 'published') {
+    // 仅作品大厅/搜索结果显式标记的访问计数；后台、个人中心和直接刷新不计数。
+    if (rawWork.status === 'published' && req.query.trackView === '1' && shouldCountView(req.userId!, rawWork.id)) {
       await prisma.work.update({ where: { id: req.params.id }, data: { views: { increment: 1 } } })
     }
     const work = await serializeWork(req.params.id, req.userId, canManageOthers)

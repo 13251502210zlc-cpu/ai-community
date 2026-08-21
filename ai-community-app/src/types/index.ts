@@ -260,8 +260,9 @@ export type Permission =
   | 'admin:domain' // 业务领域管理
   | 'admin:tag' // 标签管理
   | 'admin:user' // 用户管理 / 角色查看
+  | 'admin:userRole' // 用户角色分配
   | 'admin:recommend' // 运营推荐
-  | 'admin:role' // 权限配置 / 角色分配
+  | 'admin:role' // 权限配置（仅超级管理员）
   | 'admin:stats' // 数据统计
   | 'admin:workRead' // 查看全部状态作品
   | 'admin:workManage' // 管理任意作品
@@ -275,7 +276,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   super_admin: [
     'work:read', 'work:create', 'work:submit', 'work:editOwn', 'work:deleteOwn', 'work:offlineOwn',
     'review:view', 'review:approve', 'review:reject',
-    'admin:domain', 'admin:tag', 'admin:user', 'admin:recommend', 'admin:stats', 'admin:role', 'admin:workRead', 'admin:workManage',
+    'admin:domain', 'admin:tag', 'admin:user', 'admin:userRole', 'admin:recommend', 'admin:stats', 'admin:role', 'admin:workRead', 'admin:workManage',
   ],
 }
 
